@@ -1,2 +1,38 @@
+# Julia specific
+*.jl.*.cov
+*.jl.cov
+*.jl.mem
+/deps/deps.jl
+Manifest.toml
+
+# Documentation builds
 /docs/Manifest*.toml
 /docs/build/
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Temporary and backup files
+*.bak
+*.tmp
+*.log
+
+# Build artifacts
+*.so
+*.dll
+*.dylib
+
+# Test outputs
+test/*.out
+test/*.log
+
+# Data files (optional - uncomment if you don't want to track data)
+# *.h5
+# *.jld2
+# *.mat
+# *.csv
