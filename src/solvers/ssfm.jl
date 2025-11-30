@@ -95,7 +95,7 @@ function propagate_ssfm(pulse::Pulse, params::SimParams; progress::Bool=true)
             # Calculate nonlinear operator in frequency domain
             nonlin_w = nonlinear_operator_frequency_dependent(At_phys, gamma_im_vec, omega0_inv, 
                                                               fr, one_minus_fr, omega, fft_plan, ifft_plan,
-                                                              RW, raman, shock)
+                                                              RW, raman, shock, grid.dt)
             
             # Apply nonlinear step: exp(i*γ(ω)*...*dz)
             # For M-GNLSE: apply to pseudo-envelope

@@ -17,14 +17,16 @@ function gnlse_rhs!(du, u, p, z)
     @. exp_Lz_buffer = exp(linop * z)
     @. exp_mLz_buffer = exp(-linop * z)
     
-    # Transform back from interaction picture: A = u * exp(L*z)
+    # Transform back from interaction picture: A_w = u * exp(L*z)
     @. du = u * exp_Lz_buffer
     
     # Transform to time domain
     At = fft_plan * du
     
-    # Calculate nonlinear operator
-    nonlin = nonlinear_operator(At, params, grid, RW)
+    # Calculate nonlinear RHS: N[A] = iγ|A|²·A
+    # nonlinear_operator returns iγ|A|², so multiply by A
+    nonlin_phase = nonlinear_operator(At, params, grid, RW)
+    nonlin = @. At * nonlin_phase
     
     # Transform back to frequency domain
     du .= ifft_plan * nonlin
