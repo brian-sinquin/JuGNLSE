@@ -33,7 +33,10 @@ medium = Medium(
 
 # Create very short, high-power pulse
 T0 = 30e-15  # 30 fs FWHM / 1.76
-P0 = 1e5     # 100 kW peak power (very high for strong shock)
+P0 = 1e5     # 100 kW peak power 
+             # NOTE: This is intentionally very high to make shock effect visible
+             # over short propagation. Real experiments use lower power with longer fibers.
+             # For realistic simulations, use P0 ~ 1-10 kW with longer propagation distances.
 pulse = sech_pulse(grid, T0, P0, center_wavelength, T0=true)
 
 # Configure simulation: ONLY self-steepening, no Raman, no dispersion

@@ -33,11 +33,16 @@ omega = fftfreq(N, 1/dt) * 2π
 omega = fftshift(omega)  # Match JuGNLSE convention
 
 # Method 1: Standard FFT convention (for reference)
+# Standard: fft(time)→freq, ifft(freq)→time
 I_w_standard = fft(I_t)
+# For standard FFT, we need fftshift(omega) to match fft output order
 dI_dt_standard = real.(ifft(im .* fftshift(omega) .* I_w_standard))
 
 # Method 2: Inverted FFT convention (as in JuGNLSE)
+# Inverted: ifft(time)→freq, fft(freq)→time
 I_w_inverted = ifft(I_t)
+# For inverted FFT, omega is already in the right order (both fftshifted)
+# This is why JuGNLSE applies fftshift to omega during grid creation
 dI_dt_inverted = real.(fft(im .* omega .* I_w_inverted))
 
 # Compare with analytical

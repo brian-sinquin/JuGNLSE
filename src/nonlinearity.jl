@@ -45,6 +45,8 @@ Optimized - no conditionals.
     nonlin = gamma_im .* It
     
     # Shock term: iγ/ω₀ * ∂|A|²/∂t
+    # Mathematical foundation: ∂f/∂t ↔ +iω·F(ω) (Fourier transform property)
+    # This identity is proven by integration by parts and holds regardless of FFT convention.
     # Derivative operator: ∂/∂t → +iω in frequency domain (invariant of FFT convention)
     # Transform to frequency, apply derivative, transform back
     It_w = ifft_plan * It
