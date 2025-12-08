@@ -45,10 +45,10 @@ Optimized - no conditionals.
     nonlin = gamma_im .* It
     
     # Shock term: iγ/ω₀ * ∂|A|²/∂t
-    # With inverted FFT: ifft(time) → freq, fft(freq) → time
-    # Derivative: multiply by -iω (since ifft inverts the sign)
+    # Derivative operator: ∂/∂t → +iω in frequency domain (invariant of FFT convention)
+    # Transform to frequency, apply derivative, transform back
     It_w = ifft_plan * It
-    @. It_w *= (-im * omega)
+    @. It_w *= (im * omega)
     dI_dt = fft_plan * It_w
     @. nonlin += gamma_over_omega0_im * dI_dt
     
@@ -78,10 +78,10 @@ Optimized - no conditionals.
     nonlin = gamma_im .* R_term
     
     # Shock term: iγ/ω₀ * ∂R/∂t where R is Raman-modified intensity
-    # With inverted FFT: ifft(time) → freq, fft(freq) → time  
-    # Derivative: multiply by -iω (since ifft inverts the sign)
+    # Derivative operator: ∂/∂t → +iω in frequency domain (invariant of FFT convention)
+    # Transform to frequency, apply derivative, transform back
     R_w = ifft_plan * R_term
-    @. R_w *= (-im * omega)
+    @. R_w *= (im * omega)
     dR_dt = fft_plan * R_w
     @. nonlin += gamma_over_omega0_im * dR_dt
     
@@ -252,10 +252,10 @@ Kerr + shock with frequency-dependent γ(ω)
     It = abs2.(At)
     
     # Shock term: A * (1/ω₀) * ∂|A|²/∂t
-    # With inverted FFT: ifft(time) → freq, fft(freq) → time
-    # Derivative: multiply by -iω (since ifft inverts the sign)
+    # Derivative operator: ∂/∂t → +iω in frequency domain (invariant of FFT convention)
+    # Transform to frequency, apply derivative, transform back
     It_w = ifft_plan * It
-    @. It_w *= (-im * omega * omega0_inv)
+    @. It_w *= (im * omega * omega0_inv)
     dI_dt = fft_plan * It_w
     
     # Total nonlinearity in time domain: A*|A|² + A*(1/ω₀)*∂|A|²/∂t
@@ -289,10 +289,10 @@ Full nonlinearity with frequency-dependent γ(ω)
     @. R_term = one_minus_fr * It + fr * R_term
     
     # Shock term: A * (1/ω₀) * ∂R/∂t where R is Raman-modified intensity
-    # With inverted FFT: ifft(time) → freq, fft(freq) → time
-    # Derivative: multiply by -iω (since ifft inverts the sign)
+    # Derivative operator: ∂/∂t → +iω in frequency domain (invariant of FFT convention)
+    # Transform to frequency, apply derivative, transform back
     R_w = ifft_plan * R_term
-    @. R_w *= (-im * omega * omega0_inv)
+    @. R_w *= (im * omega * omega0_inv)
     dR_dt = fft_plan * R_w
     
     # Total nonlinearity in time domain: A*R + A*(1/ω₀)*∂R/∂t
