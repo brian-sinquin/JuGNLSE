@@ -196,10 +196,14 @@ Raman_term = fft(It_w)   # Back to time domain
 - [`nonlinear_operator`](@ref): Uses frequency-domain response for Raman term
 """
 function raman_response_frequency(h_R::Vector{Float64}, grid::Grid)
-    # FFT of Raman response
-    # Note: Removed grid.N scaling - it was causing values ~1e13 which broke RK methods
-    # The time step (dt) scaling is applied during convolution in nonlinear operators
+    # FFT of Raman response for convolution
+    # With inverted FFT convention: ifft(time) → frequency
+    # h_R is defined on centered time grid: t = [-T/2, ..., 0, ..., T/2]
+    # h_R(t<0)=0 (causal), h_R(t≥0)=values
+    # Need fftshift to convert from centered order to FFT order before transform
+    # FFT order has DC (t=0) component first: [h_R(0), h_R(dt), ..., 0, 0, ...]
     h_R_shifted = fftshift(h_R)
     RW = ifft(h_R_shifted)
+    # The dt scaling is applied during convolution in nonlinear operators
     RW
 end

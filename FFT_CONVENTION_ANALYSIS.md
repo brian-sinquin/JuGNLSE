@@ -57,7 +57,7 @@ It_w = ifft_plan * It
 dI_dt = fft_plan * It_w
 ```
 
-### Issue 2: fftshift Usage in Raman Response (MODERATE)
+### Issue 2: fftshift Usage in Raman Response (RESOLVED - WAS CORRECT)
 
 **Location**: `raman.jl` line 202
 
@@ -70,21 +70,17 @@ function raman_response_frequency(h_R::Vector{Float64}, grid::Grid)
 end
 ```
 
-**Problem**: The `fftshift` is applied **BEFORE** the FFT. This is inconsistent with the grid convention where omega is already fftshifted.
+**Initial Concern**: The `fftshift` seemed inconsistent, but after deeper analysis...
 
 **Analysis**:
-- `grid.omega` is already `fftshift`ed (grid.jl line 58)
-- `h_R(t)` is defined on the time grid which is NOT shifted (centered at t=0)
-- When computing FFT, we need h_R in the same order as the FFT expects
+- `h_R(t)` is defined on centered time grid: `t = [-T/2, ..., -dt, 0, dt, ..., T/2]`
+- `h_R` values are: `[0, 0, ..., 0, h_R(0), h_R(dt), ..., h_R(T/2)]` (causal: zero for t<0)
+- `fftshift` converts from centered order to FFT order: `[h_R(0), h_R(dt), ..., 0, 0, ...]`
+- Then `ifft` correctly transforms time→frequency (with inverted convention)
 
-**Correct Approach**:
-Since the grid.omega is fftshifted, and h_R is defined on the unshifted time grid (centered at t=0), we should:
-1. NOT apply fftshift to h_R before FFT
-2. OR apply ifftshift to h_R if it was meant to be in frequency order
+**Conclusion**: **The current implementation is CORRECT**. The fftshift properly prepares the causal Raman response for FFT transformation.
 
-**Issue**: The current approach may cause phase errors in Raman response, but this is less critical than the shock term.
-
-### Issue 3: Grid Omega Already Shifted (LOW - Design Choice)
+### Issue 3: Grid Omega fftshift (RESOLVED - CORRECT DESIGN)
 
 **Location**: `grid.jl` line 58
 
@@ -93,66 +89,47 @@ Since the grid.omega is fftshifted, and h_R is defined on the unshifted time gri
 omega = fftshift(omega)
 ```
 
-**Analysis**: This pre-applies fftshift to omega, which means:
-- omega[1] corresponds to ω ≈ 0 (center frequency)
-- omega array is in "human-readable" order: [low freq ... center ... high freq]
-- But FFTW expects omega in FFT order: [0, +freq..., -freq...]
+**Analysis**: This pre-applies fftshift to omega to convert from centered order to FFT order:
+- Initially: `omega = [-ω_max, ..., -dω, 0, dω, ..., ω_max]` (centered, human-readable)
+- After fftshift: `omega = [0, dω, ..., ω_max, -ω_max, ..., -dω]` (FFT order)
 
-**Consequence**: 
-- When multiplying by omega in frequency domain (e.g., for derivatives), the array order is correct
-- BUT this creates confusion and may introduce errors when using fft/ifft
+**Why This Is Correct**:
+- When we do `ifft(At)`, we get `Aw` in FFT order (DC component first)
+- `grid.omega` is also in FFT order
+- Element-wise operations like `Aw .* exp(linop * dz)` work correctly with both in FFT order
 
-**Recommendation**: Either:
-1. Keep omega unshifted (FFT order) and apply fftshift when needed for visualization only
-2. OR consistently apply ifftshift before FFT operations and fftshift after
+**Conclusion**: **The current implementation is CORRECT**. The fftshift in grid creation is a deliberate design choice that ensures omega and the FFT output are in the same order.
 
 ## Recommended Corrections
 
-### Priority 1: Fix Self-Steepening Sign (CRITICAL)
+### ✅ Priority 1: Fix Self-Steepening Sign (CRITICAL) - **COMPLETED**
 
 **File**: `src/nonlinearity.jl`
 
-**Lines to Change**: 51, 84, 258, 295
+**Lines Changed**: 51, 84, 258, 295
 
-**Current**:
+**Change Made**:
 ```julia
+# OLD (INCORRECT):
 @. It_w *= (-im * omega)
-```
 
-**Corrected**:
-```julia
+# NEW (CORRECT):
 @. It_w *= (im * omega)
 ```
 
-**Justification**: The derivative operator ∂/∂t → +iω in frequency domain, regardless of FFT convention. The current -iω causes self-steepening in the wrong direction.
+**Justification**: The derivative operator ∂/∂t → +iω in frequency domain is INVARIANT of FFT convention. The previous code incorrectly used -iω based on a misunderstanding, causing self-steepening to occur in the wrong direction.
 
-### Priority 2: Verify Raman Response Transform (MODERATE)
+### ✅ Priority 2: Verify Raman Response Transform - **VERIFIED CORRECT**
 
 **File**: `src/raman.jl`
 
-**Lines to Review**: 198-205
+**Conclusion**: After detailed analysis, the current implementation using `fftshift` before `ifft` is **CORRECT**. It properly converts the causal Raman response from centered time order to FFT order before transformation.
 
-**Current Approach Issues**:
-1. fftshift applied before ifft may cause phase errors
-2. Scaling was removed (line 201 comment) which may affect normalization
+### ✅ Priority 3: Grid Omega Convention - **VERIFIED CORRECT**
 
-**Recommended Test**:
-Create a test that verifies Raman response convolution produces correct delay (Stokes shift to longer wavelengths).
+**File**: `src/grid.jl`
 
-### Priority 3: Standardize FFT Convention (LONG-TERM)
-
-**Recommendation**: Migrate to **STANDARD FFT CONVENTION** for consistency with literature and other packages.
-
-**Changes Required**:
-1. **grid.jl**: Remove fftshift from omega initialization
-2. **All solvers**: Swap fft ↔ ifft
-3. **All nonlinearity.jl**: Update transform directions
-4. **raman.jl**: Update Raman response frequency calculation
-
-**Benefits**:
-- Consistency with MATLAB gnlse, gnlse-python, PyNLO
-- Easier to compare with published equations
-- Reduced confusion about sign conventions
+**Conclusion**: The `fftshift` applied to omega in grid creation is a **correct design choice**. It ensures omega is in FFT order, matching the order of frequency-domain arrays produced by ifft.
 
 ## Physical Tests to Validate Corrections
 
@@ -249,6 +226,33 @@ F[∂f/∂t] = ∫_{-∞}^{∞} ∂f/∂t * exp(-iωt) dt
 
 ## Conclusion
 
-The **primary issue** causing self-steepening to arise in the wrong direction is the **incorrect sign** of the derivative operator in the shock term implementation. Changing `-im * omega` to `+im * omega` in lines 51, 84, 258, and 295 of `nonlinearity.jl` will correct this critical bug.
+After comprehensive analysis of the JuGNLSE codebase:
 
-Secondary issues with fftshift and FFT conventions should be addressed for long-term code health, but the shock term sign is the **immediate fix** required.
+### Critical Issue Fixed ✅
+
+**Self-Steepening Sign Error**: The **primary issue** causing self-steepening to arise in the wrong direction was the **incorrect sign** of the derivative operator in the shock term implementation. 
+
+**Fix Applied**: Changed `-im * omega` to `+im * omega` in 4 locations in `nonlinearity.jl`. This corrects the derivative operator to the physically correct form: ∂/∂t → +iω.
+
+### Other Components Verified ✅
+
+1. **Raman Response Transform**: The use of `fftshift` before `ifft` in `raman_response_frequency` is **CORRECT**. It properly prepares the causal response function for FFT transformation.
+
+2. **Grid Omega Convention**: The `fftshift` applied during grid creation is **CORRECT**. It ensures omega is in FFT order, consistent with how frequency-domain arrays are produced.
+
+3. **FFT Convention**: The "inverted" FFT convention (ifft: time→freq, fft: freq→time) is **internally consistent** throughout the codebase. While unconventional, it works correctly when applied consistently.
+
+### Validation Required
+
+The fix should be validated by running the provided test scripts:
+1. `test_self_steepening_direction.jl` - Should now show steepening on trailing edge
+2. `test_raman_frequency_shift.jl` - Should show correct red-shift
+
+### Long-Term Considerations
+
+While the current inverted FFT convention works correctly after the sign fix, consider migrating to standard FFT convention in the future for:
+- Better alignment with literature and reference implementations
+- Reduced confusion for new contributors
+- Easier comparison with published equations
+
+However, this is a **non-critical, long-term enhancement** - not a bug fix.
