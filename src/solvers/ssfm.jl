@@ -1,16 +1,13 @@
 """
-Symmetric Split-Step Fourier Method (SSFM) solver for GNLSE.
+Symmetric split-step Fourier method (2nd order) for GNLSE.
 
-Classic, robust method for nonlinear pulse propagation:
-- Symmetric split: exp(D̂·dz/2) · exp(N̂·dz) · exp(D̂·dz/2)
-- Can use fixed or adaptive stepping
-- More steps than ERK4IP but simpler and very reliable
-- Good for validation and benchmarking
+Implements symmetric operator splitting: exp(D̂·dz/2) · exp(N̂·dz) · exp(D̂·dz/2).
+Supports fixed or adaptive stepping. Requires 2-5× more steps than ERK4IP for
+comparable accuracy but simpler per-step implementation. Useful for validation
+and benchmarking.
 
-Algorithm:
-1. Half-step dispersion in frequency domain
-2. Full-step nonlinearity in time domain
-3. Half-step dispersion in frequency domain
+Algorithm: (1) half-step dispersion in frequency domain, (2) full-step
+nonlinearity in time domain, (3) half-step dispersion in frequency domain.
 """
 
 using FFTW

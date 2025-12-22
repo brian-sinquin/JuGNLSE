@@ -14,9 +14,9 @@ Nonlinear waveguide medium parameters for GNLSE propagation.
 
 # Notes
 
-  - Vector gamma enables M-GNLSE with frequency-dependent effective area (Lægsgaard 2007)
-  - `scaling` required for vector gamma simulations
-  - Beta array excludes β₀ and β₁
+  - Vector gamma enables M-GNLSE with frequency-dependent effective area (Lægsgaard 2007).
+  - `scaling` is required for vector gamma simulations.
+  - Beta array excludes β₀ and β₁.
 """
 struct Medium{T <: Real}
     length::T
@@ -114,12 +114,10 @@ abstract type RamanModel end
 """
     BlowWood <: RamanModel
 
-Single Lorentzian Raman response model (Blow & Wood 1989).
+Single Lorentzian Raman response model. Suitable for narrowband simulations with
+pulse durations > 100 fs. Parameters: τ₁ = 12.2 fs, τ₂ = 32.0 fs, fr = 0.18.
 
-# Parameters
-
-  - τ₁ = 12.2 fs, τ₂ = 32.0 fs
-  - Default fr = 0.18
+Reference: K. J. Blow & D. Wood, IEEE J. Quantum Electron. 25, 2665 (1989).
 """
 struct BlowWood <: RamanModel
     fr::Float64
@@ -129,17 +127,12 @@ end
 """
     LinAgrawal <: RamanModel
 
-Three-component Raman model with Boson peak (Lin & Agrawal 2006).
+Three-component Raman model with Boson peak. Provides improved accuracy for
+broadband supercontinuum generation compared to single-Lorentzian model.
 
-# Parameters
+Parameters: τ₁ = 12.2 fs, τ₂ = 32 fs, τb = 96 fs, fb = 0.21, fr = 0.245.
 
-  - τ₁ = 12.2 fs, τ₂ = 32 fs, τb = 96 fs
-  - fb = 0.21 (Boson peak fraction)
-  - Default fr = 0.245
-
-# Notes
-
-Includes low-frequency Boson peak for improved broadband accuracy.
+Reference: Q. Lin & G. P. Agrawal, Opt. Lett. 31, 3086 (2006).
 """
 struct LinAgrawal <: RamanModel
     fr::Float64
@@ -150,12 +143,12 @@ end
 """
     Hollenbeck <: RamanModel
 
-13-oscillator Raman model fitted to measured gain spectrum (Hollenbeck & Cantrell 2002).
+13-oscillator Raman model fitted to measured Raman gain spectrum of fused silica.
+Most accurate model for broadband simulations. Oscillators span 1.75-15.6 THz.
 
-# Parameters
+Parameters: 13 damped harmonic oscillators, fr = 0.20.
 
-  - 13 damped harmonic oscillators
-  - Default fr = 0.20
+Reference: D. Hollenbeck & C. D. Cantrell, J. Opt. Soc. Am. B 19, 2886 (2002).
 """
 struct Hollenbeck <: RamanModel
     fr::Float64
@@ -205,8 +198,8 @@ Optical pulse envelope in time and frequency domains.
 
 # Notes
 
-  - Related by FFT: `Aw = ifft(At)`, `At = fft(Aw)`
-  - Energy: E = ∫|A(t)|²dt, Power: P(t) = |A(t)|²
+  - Related by FFT: `Aw = fft(At)`, `At = ifft(Aw)` (inverted FFT convention).
+  - Energy: E = ∫|A(t)|²dt, Power: P(t) = |A(t)|².
 """
 mutable struct Pulse{T <: Complex}
     At::Vector{T}

@@ -30,7 +30,7 @@ medium = Medium(0.15, 0.11, [-11.83e-27], 0.0, 835e-9)
 
 # Create pulse and solve
 pulse = sech_pulse(grid, 28.4e-15, 1e3)
-params = SimParams(medium=medium)
+params = SimParams(; medium=medium)
 results = solve(pulse, params)
 ```
 
@@ -100,7 +100,6 @@ export dispersion_operator, apply_dispersion, apply_dispersion!
 
 # Export Raman functions
 export raman_response, raman_response_frequency
-
 
 # Export solver functions
 export solve

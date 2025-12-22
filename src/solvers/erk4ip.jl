@@ -1,6 +1,9 @@
 """
-ERK4IP solver following FiberNlse's clean algorithm structure.
-Uses PhysicsModel for precomputed operators and FSAL property.
+Embedded Runge-Kutta 4(3) solver in interaction picture with adaptive stepping.
+
+Implements 4th-order propagation with embedded 3rd-order error estimation for
+automatic step size control. Uses precomputed operators via PhysicsModel and
+FSAL (First Same As Last) property for efficiency.
 """
 
 using FFTW

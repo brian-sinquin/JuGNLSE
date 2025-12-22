@@ -1,10 +1,11 @@
 """
-RK4IP solver: Fourth-order Runge-Kutta in the Interaction Picture method.
-Reference: J. Hult, J. Lightwave Tech. 25, 3770-3775 (2007)
+4th-order Runge-Kutta method in interaction picture with fixed step size.
 
-This is a fixed-step size variant of the adaptive ERK4IP solver, using only
-4 RK stages without embedded error estimation. Simpler than ERK4IP but requires
-manual step size selection.
+Fixed-step variant of ERK4IP using 4 Runge-Kutta stages without embedded error
+estimation. Simpler per-step implementation than ERK4IP but requires manual step
+size selection for desired accuracy.
+
+Reference: J. Hult, J. Lightwave Tech. 25, 3770-3775 (2007).
 """
 
 using FFTW
