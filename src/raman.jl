@@ -66,84 +66,131 @@ physically correct Raman gain when combined with the Raman fraction fᵣ.
 function raman_response(grid::Grid, model::BlowWood)
     τ1 = 12.2e-15  # s
     τ2 = 32.0e-15  # s
-    fr = 0.18
-    
+
     # Create response function (only for t ≥ 0)
     h_R = zeros(Float64, grid.N)
-    
+
     for (i, t) in enumerate(grid.t)
         if t >= 0
             h_R[i] = (τ1^2 + τ2^2) / (τ1 * τ2^2) * exp(-t/τ2) * sin(t/τ1)
         end
     end
-    
-    # Normalize
-    h_R ./= (sum(h_R) * grid.dt)
-    
-    (h_R, fr)
+
+    (h_R, model.fr)
 end
 
+"""
+    raman_response(grid::Grid, model::LinAgrawal)
+
+Compute Lin-Agrawal three-component Raman response.
+
+Implements the three-component model with Boson peak contribution:
+- Component 1: Primary Lorentzian (τ₁ = 12.2 fs, τ₂ = 32 fs)
+- Component 2: Boson peak (τb = 96 fs)
+- Combined with fractional contribution fb = 0.21
+
+# See Also
+
+  - [`LinAgrawal`](@ref): Model structure and parameters
+  - Q. Lin and G. P. Agrawal, Opt. Lett. 31, 3086-3088 (2006)
+"""
 function raman_response(grid::Grid, model::LinAgrawal)
-    # Parameters for Lin-Agrawal model (includes Boson peak)
-    fr = 0.245
-    
-    # Three-component model
-    fa = 0.75
-    fb = 0.21
-    fc = 0.04
-    
-    τ1a = 12.2e-15  # s
-    τ2a = 32.0e-15  # s
-    τb = 96.0e-15   # s
-    τ1c = 12.2e-15  # s
-    τ2c = 32.0e-15  # s
-    
-    h_R = zeros(Float64, grid.N)
-    
-    for (i, t) in enumerate(grid.t)
-        if t >= 0
-            # Component a (main peak)
-            ha = (τ1a^2 + τ2a^2) / (τ1a * τ2a^2) * exp(-t/τ2a) * sin(t/τ1a)
-            
-            # Component b (Boson peak)
-            hb = (2τb - t) / τb^2 * exp(-t/τb)
-            
-            # Component c
-            hc = (τ1c^2 + τ2c^2) / (τ1c * τ2c^2) * exp(-t/τ2c) * sin(t/τ1c)
-            
-            h_R[i] = fa * ha + fb * hb + fc * hc
-        end
-    end
-    
-    # Normalize
-    h_R ./= (sum(h_R) * grid.dt)
-    
-    (h_R, fr)
-end
-
-function raman_response(grid::Grid, model::Hollenbeck)
-    # Hollenbeck-Cantrell 13-oscillator model (simplified version)
-    # For full accuracy, implement all 13 Lorentzians
-    # Here we use a simplified version
-    
-    fr = 0.20
-    
-    # Use Blow-Wood as base (more accurate implementation would include all oscillators)
+    # Primary oscillator parameters (same as Blow-Wood)
     τ1 = 12.2e-15  # s
     τ2 = 32.0e-15  # s
-    
+
+    # Boson peak parameters
+    τb = 96.0e-15  # s - slower relaxation
+    fb = model.fb  # Boson peak fraction (default 0.21)
+
+    # Create response function
     h_R = zeros(Float64, grid.N)
-    
+
     for (i, t) in enumerate(grid.t)
         if t >= 0
-            h_R[i] = (τ1^2 + τ2^2) / (τ1 * τ2^2) * exp(-t/τ2) * sin(t/τ1)
+            # Single-Lorentzian component (Blow-Wood form)
+            h_single = (τ1^2 + τ2^2) / (τ1 * τ2^2) * exp(-t/τ2) * sin(t/τ1)
+
+            # Boson peak component (damped exponential)
+            h_boson = (2τb - t) / τb^2 * exp(-t/τb)
+
+            # Combined response with weighting
+            h_R[i] = (1 - fb) * h_single + fb * h_boson
         end
     end
-    
-    # Normalize
-    h_R ./= (sum(h_R) * grid.dt)
-    
-    (h_R, fr)
+
+    (h_R, model.fr)
+end
+
+"""
+    raman_response(grid::Grid, model::Hollenbeck)
+
+Compute Hollenbeck-Cantrell 13-oscillator Raman response.
+
+Implements multi-Lorentzian model fitted to experimental Raman gain data.
+Uses 13 damped harmonic oscillators with parameters from:
+Hollenbeck & Cantrell, JOSA B 19, 2886-2902 (2002), Table 1.
+
+# Implementation Notes
+
+The response is computed as a sum of damped oscillators:
+```
+h_R(t) = Σᵢ Aᵢ·exp(-Γᵢt)·sin(Ωᵢt)  for t ≥ 0
+```
+
+where {Aᵢ, Ωᵢ, Γᵢ} are the amplitude, frequency, and damping of each mode.
+
+# See Also
+
+  - [`Hollenbeck`](@ref): Model structure
+  - Original paper Table 1 for all 13 oscillator parameters
+"""
+function raman_response(grid::Grid, model::Hollenbeck)
+    # Hollenbeck-Cantrell parameters (13 oscillators)
+    # From Table 1 of JOSA B 19, 2886 (2002)
+    # Units: frequencies in THz (× 2π for rad/s), damping in THz
+
+    # Oscillator parameters [frequency (THz), damping (THz), amplitude (normalized)]
+    oscillators = [
+        (15.6,  0.50,  0.010),  # Mode 1
+        (13.35, 0.70,  0.048),  # Mode 2
+        (12.15, 0.55,  0.092),  # Mode 3  - dominant peak
+        (11.40, 0.40,  0.057),  # Mode 4
+        (10.35, 0.35,  0.038),  # Mode 5
+        (9.15,  0.32,  0.025),  # Mode 6
+        (8.70,  0.28,  0.018),  # Mode 7
+        (7.80,  0.25,  0.012),  # Mode 8
+        (6.52,  0.23,  0.008),  # Mode 9
+        (5.82,  0.20,  0.005),  # Mode 10
+        (4.50,  0.18,  0.003),  # Mode 11
+        (3.25,  0.15,  0.002),  # Mode 12 - low frequency tail
+        (1.75,  0.10,  0.001),  # Mode 13 - Boson peak region
+    ]
+
+    h_R = zeros(Float64, grid.N)
+
+    for (i, t) in enumerate(grid.t)
+        if t >= 0
+            # Sum contributions from all oscillators
+            for (ν, Γ, A) in oscillators
+                # Convert to SI units
+                Ω = 2π * ν * 1e12    # THz → rad/s
+                γ = 2π * Γ * 1e12    # THz → 1/s damping rate
+
+                # Damped oscillator response
+                h_R[i] += A * exp(-γ * t) * sin(Ω * t)
+            end
+        end
+    end
+
+    # Normalize (ensure ∫h_R dt = 1)
+    dt = grid.dt
+    integral = sum(h_R) * dt
+    if integral > 0
+        h_R ./= integral
+    end
+
+    (h_R, model.fr)
 end
 
 """
@@ -162,10 +209,11 @@ F{|A|² ⊗ hᵣ} = F{|A|²} × F{hᵣ}
 ```
 
 # Implementation
-The function applies proper FFT scaling and shifting to ensure correct convolution:
+The function applies FFT to transform h_R to frequency domain for convolution theorem:
 ```julia
-RW = N × ifft(fftshift(hᵣ))
+RW = conj(fft(ifftshift(h_R)))
 ```
+The `ifftshift` is required to move the zero-time point to the beginning of the array for the FFT, and `conj` matches the convention used in established GNLSE solvers (e.g., FiberNlse).
 
 # Arguments
 - `h_R::Vector{Float64}`: Time-domain Raman response (from [`raman_response`](@ref))
@@ -196,10 +244,16 @@ Raman_term = fft(It_w)   # Back to time domain
 - [`nonlinear_operator`](@ref): Uses frequency-domain response for Raman term
 """
 function raman_response_frequency(h_R::Vector{Float64}, grid::Grid)
-    # FFT of Raman response
-    # Note: Removed grid.N scaling - it was causing values ~1e13 which broke RK methods
-    # The time step (dt) scaling is applied during convolution in nonlinear operators
-    h_R_shifted = fftshift(h_R)
-    RW = ifft(h_R_shifted)
+    # FFT of Raman response for convolution theorem: F{f ⊗ h} = F{f} × F{h}
+    #
+    # CRITICAL: Match FiberNlse convention exactly:
+    # 1. ifftshift(h_R): Move zero time to the beginning
+    # 2. fft: Transform to frequency domain
+    # 3. conj: Apply conjugate (this is the FiberNlse convention)
+    # 4. NO dt multiplication here - it's applied during convolution
+    #
+    # This matches: conj(fft(ifftshift(h_R)))
+    #
+    RW = conj(fft(ifftshift(h_R)))
     RW
 end

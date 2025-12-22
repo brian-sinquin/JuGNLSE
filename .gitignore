@@ -1,13 +1,15 @@
 # Julia specific
-*.jl.*.cov
 *.jl.cov
 *.jl.mem
+*.jl.mem.*
+*.jl.cov.*
 /deps/deps.jl
 Manifest.toml
 
 # Documentation builds
-/docs/Manifest*.toml
+/docs/Manifest.toml
 /docs/build/
+/docs/site/
 
 # IDE and editor files
 .vscode/
@@ -16,11 +18,15 @@ Manifest.toml
 *.swo
 *~
 .DS_Store
+Thumbs.db
 
 # Temporary and backup files
 *.bak
 *.tmp
 *.log
+/temp/
+/scratch_*.jl
+/debug_*.jl
 
 # Build artifacts
 *.so
@@ -28,10 +34,23 @@ Manifest.toml
 *.dylib
 
 # Test outputs
-test/*.out
-test/*.log
+/test/*.out
+/test/*.log
 
-# Data files (optional - uncomment if you don't want to track data)
+# Generated plots and figures
+*.png
+*.pdf
+*.svg
+*.gif
+
+# Reference implementations (external repos - not tracked)
+/research/reference_implementations/*/
+
+# Exclude examples and research folders (keep local only)
+/examples/
+/research/
+
+# Data files (optional)
 # *.h5
 # *.jld2
 # *.mat

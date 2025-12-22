@@ -1,7 +1,7 @@
 """
     JuGNLSE
 
-A high-performance Julia package for solving the Generalized Nonlinear Schrödinger Equation (GNLSE)  
+A high-performance Julia package for solving the Generalized Nonlinear Schrödinger Equation (GNLSE)
 for modeling nonlinear pulse propagation in optical fibers and waveguides.
 
 # Overview
@@ -16,23 +16,23 @@ JuGNLSE provides state-of-the-art numerical methods for simulating complex nonli
 # Key Features
 
 ## Physical Effects
-✅ **Dispersion**: Arbitrary-order Taylor expansion (β₂, β₃, β₄, ...)  
-✅ **Kerr nonlinearity**: Self-phase modulation (SPM), cross-phase modulation  
-✅ **Raman scattering**: Three models (Blow-Wood, Lin-Agrawal, Hollenbeck)  
-✅ **Self-steepening**: Shock formation for sub-100 fs pulses  
-✅ **Fiber loss**: Constant or frequency-dependent α(ω)  
+✅ **Dispersion**: Arbitrary-order Taylor expansion (β₂, β₃, β₄, ...)
+✅ **Kerr nonlinearity**: Self-phase modulation (SPM), cross-phase modulation
+✅ **Raman scattering**: Blow-Wood (1989) model
+✅ **Self-steepening**: Shock formation for sub-100 fs pulses
+✅ **Fiber loss**: Constant or frequency-dependent α(ω)
 ✅ **M-GNLSE**: Frequency-dependent γ(ω) via Lægsgaard pseudo-envelope method
 
 ## Numerical Methods
-🚀 **RK4IP**: 4th-order Runge-Kutta in Interaction Picture (highest accuracy)  
-🚀 **ERK4IP**: Embedded RK4(3) with adaptive stepping (best efficiency)  
-🚀 **SSFM**: Split-Step Fourier Method (fastest for exploration)
+🚀 **ERK4IP**: Embedded RK4(5) with adaptive stepping and automatic error control
+🚀 **RK4IP**: Classic 4th-order Runge-Kutta in Interaction Picture (Hult 2007)
+🚀 **SSFM**: Symmetric Split-Step Fourier Method for validation
 
 ## Performance
-⚡ Zero-allocation hot paths with pre-allocated buffers  
-⚡ Optimized FFT operations (FFTW with power-of-2 grids)  
-⚡ Vectorized operations (@. macro throughout)  
-⚡ Type-stable, no conditionals in solver loops  
+⚡ Zero-allocation hot paths with pre-allocated buffers
+⚡ Optimized FFT operations (FFTW with power-of-2 grids)
+⚡ Vectorized operations (@. macro throughout)
+⚡ Type-stable, no conditionals in solver loops
 ⚡ Compile-time dispatch for specialized solvers
 
 # Quick Start
@@ -59,30 +59,29 @@ T0 = 28.4e-15  # 1/e width
 P0 = abs(beta2) / (medium.gamma * T0^2)
 
 # Step 4: Create pulse
-pulse = sech_pulse(grid, T0, P0, 835e-9, T0=true)
+pulse = sech_pulse(grid, T0, P0, T0=true)
 
 # Step 5: Configure simulation
 params = SimParams(medium=medium, raman=false, shock=false)
 
 # Step 6: Solve!
-results = solve(pulse, params, method=:rk4ip)
+results = solve(pulse, params)
 ```
 
 ## Supercontinuum Generation
 ```julia
 # High-power N=10 soliton
-pulse = sech_pulse(grid, T0, 10*P0, 835e-9, T0=true)
+pulse = sech_pulse(grid, T0, 10*P0, T0=true)
 
 params = SimParams(
     medium = medium,
     N = 2^14,            # High resolution
     n_saves = 500,
     raman = true,        # Essential!
-    shock = true,
-    raman_model = Hollenbeck()
+    shock = true
 )
 
-results = solve(pulse, params, method=:erk4ip, rtol=1e-7)
+results = solve(pulse, params, rtol=1e-7)
 ```
 
 # Main Exports
@@ -92,7 +91,7 @@ results = solve(pulse, params, method=:erk4ip, rtol=1e-7)
 - `Grid`: Time-frequency grid (t, ω, dt, dω)
 - `Pulse`: Optical pulse (At, Aw)
 - `SimParams`: Simulation configuration
-- `RamanModel`: `BlowWood`, `LinAgrawal`, `Hollenbeck`
+- `RamanModel`: `BlowWood`
 
 ## Pulse Creation
 - `sech_pulse`: Hyperbolic secant (solitons)
@@ -105,10 +104,9 @@ results = solve(pulse, params, method=:erk4ip, rtol=1e-7)
 - `create_grid_from_medium`: Auto-estimate from medium
 
 ## Solvers
-- `solve`: Main interface (method=:rk4ip, :erk4ip, or :ssfm)
-- `propagate_rk4ip`: Direct RK4IP call
-- `propagate_erk4ip`: Direct ERK4IP call
-- `propagate_ssfm`: Direct SSFM call
+- `solve`: Main interface with method selection (:ERK4IP or :SSFM)
+- `propagate_erk4ip`: Direct ERK4IP call (adaptive, high accuracy)
+- `propagate_ssfm`: Direct SSFM call (fixed/adaptive step)
 
 ## Utilities
 - `calculate_soliton_power`: P₀ = |β₂|/(γT₀²)
@@ -140,25 +138,25 @@ Access full documentation with examples:
 # Performance Tips
 
 1. **Use power-of-2 grids**: N = 2^12 or 2^14 for FFT efficiency
-2. **Choose right method**: SSFM (fast preview) → ERK4IP (production) → RK4IP (benchmark)
+2. **Adaptive stepping**: ERK4IP automatically adjusts for optimal performance
 3. **Optimize tolerances**: `reltol=1e-6` sufficient for most, `1e-8` for high accuracy
 4. **Save strategically**: More `n_saves` → more memory, finer z-resolution
 5. **Pre-allocate**: Avoid calling `solve()` in tight loops
 
 # References
 
-**GNLSE Theory:**  
+**GNLSE Theory:**
 G. P. Agrawal, "Nonlinear Fiber Optics," 6th ed. (Academic Press, 2019)
 
-**Numerical Methods:**  
+**Numerical Methods:**
 J. Hult, J. Lightwave Technol. 25, 3770 (2007) - RK4IP method
 
-**M-GNLSE:**  
+**M-GNLSE:**
 J. Lægsgaard, Opt. Express 15, 16110 (2007) - Pseudo-envelope method
 
-**Raman Models:**  
-K. J. Blow & D. Wood, IEEE J. Quantum Electron. 25, 2665 (1989)  
-Q. Lin & G. P. Agrawal, Opt. Lett. 31, 3086 (2006)  
+**Raman Models:**
+K. J. Blow & D. Wood, IEEE J. Quantum Electron. 25, 2665 (1989)
+Q. Lin & G. P. Agrawal, Opt. Lett. 31, 3086 (2006)
 D. Hollenbeck & C. D. Cantrell, J. Opt. Soc. Am. B 19, 2886 (2002)
 
 # Contributing
@@ -173,7 +171,11 @@ module JuGNLSE
 
 using FFTW
 using LinearAlgebra
-using OrdinaryDiffEq
+using Unitful
+using PhysicalConstants.CODATA2018: SpeedOfLightInVacuum
+
+# Physical constants (extract numerical value in m/s)
+const SPEED_OF_LIGHT = ustrip(u"m/s", SpeedOfLightInVacuum)  # 299792458.0 m/s
 
 # Include submodules
 include("types.jl")
@@ -183,17 +185,20 @@ include("dispersion.jl")
 include("raman.jl")
 include("nonlinearity.jl")
 
-# Include solvers
-include("solvers/ssfm.jl")
-include("solvers/rk4ip.jl")
+# Solvers
 include("solvers/erk4ip.jl")
+include("solvers/rk4ip.jl")
+include("solvers/ssfm.jl")
+
 include("solver.jl")
 
-include("utils.jl")
+include("physics.jl")
+include("analysis.jl")
 
 # Export types
 export Medium, SimParams, Grid, Pulse
 export RamanModel, BlowWood, LinAgrawal, Hollenbeck
+export PhysicsModel  # Internal physics model struct
 
 # Export grid functions
 export create_grid, create_grid_from_medium
@@ -207,16 +212,18 @@ export dispersion_operator, apply_dispersion, apply_dispersion!
 # Export Raman functions
 export raman_response, raman_response_frequency
 
-# Export nonlinearity functions
-export nonlinear_operator, nonlinear_operator_frequency_dependent, apply_nonlinearity!
 
 # Export solver functions
-export solve, propagate_ssfm, propagate_rk4ip, propagate_erk4ip
+export solve
+export propagate_erk4ip, propagate_rk4ip, propagate_ssfm
 
 # Export utility functions
 export calculate_soliton_power, soliton_order, pulse_energy, peak_power
+export dispersion_length, nonlinear_length, soliton_period
 export spectral_bandwidth, time_bandwidth_product, fwhm
 export db_to_linear, linear_to_db
 export wavelength_to_frequency, frequency_to_wavelength
+export gamma_from_aeff, gamma_from_aeff_vec, aeff_from_measured_data
+export convert_loss
 
 end

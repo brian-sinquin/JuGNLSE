@@ -12,12 +12,7 @@ makedocs(;
         edit_link="master",
         assets=String[],
     ),
-    pages=[
-        "Home" => "index.md",
-    ],
+    pages=["Home" => "index.md"],
 )
 
-deploydocs(;
-    repo="github.com/brian-sinquin/JuGNLSE.jl",
-    devbranch="master",
-)
+deploydocs(; repo="github.com/brian-sinquin/JuGNLSE.jl", devbranch="master")

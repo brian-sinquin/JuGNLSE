@@ -1,0 +1,11 @@
+- Implement SSFM solver ✓
+- Implement Frequency dependant nonlinear index ✓
+- Implement other raman models ✓
+- Add modern progress bars (ProgressMeter.jl) ✓
+- Add more examples
+- Improve documentation (Docstrings + @autodocs) ✓
+- Optimize performance (Zero allocations in hot paths) ✓
+- Clean up codebase ✓
+- Categorized test suite (Unit, API, Physics, Solvers) ✓
+
+- Make a adversarial automated benchmark against other packages (e.g., PyNLO, GNLSE-Python, using CI/CD)

@@ -1,260 +1,228 @@
 """
-    gnlse_rhs!(du, u, p, z)
+RK4IP solver: Fourth-order Runge-Kutta in the Interaction Picture method.
+Reference: J. Hult, J. Lightwave Tech. 25, 3770-3775 (2007)
 
-Right-hand side of GNLSE in the interaction picture for ODE solver (scalar gamma).
-Optimized - no conditionals in hot path.
+This is a fixed-step size variant of the adaptive ERK4IP solver, using only
+4 RK stages without embedded error estimation. Simpler than ERK4IP but requires
+manual step size selection.
+"""
+
+using FFTW
+using LinearAlgebra: mul!
+
+# Import nonlinearity module functions
+import ..build_physics_model, ..PhysicsModel
+
+"""
+    propagate_rk4ip(pulse::Pulse, params::SimParams; progress::Bool=true, n_steps::Int=1000)
+
+Propagate pulse using 4th-order Runge-Kutta in Interaction Picture (RK4IP).
+
+The RK4IP method from Hult (2007) splits the propagation into linear (dispersion)
+and nonlinear parts using the interaction picture transformation. Uses fixed step
+size unlike the adaptive ERK4IP solver.
+
+# Algorithm
+
+For each step of size dz:
+
+ 1. Transform to interaction picture: Âᵢₚ = exp(D̂·dz/2)·Â
+
+ 2. Compute 4 RK stages:
+
+      + k₁ = exp(D̂·dz/2)·N̂[A(z)]
+      + k₂ = N̂[IFFT(Âᵢₚ + k₁/2)]
+      + k₃ = N̂[IFFT(Âᵢₚ + k₂/2)]
+      + k₄ = N̂[IFFT(exp(D̂·dz/2)·(Âᵢₚ + k₃))]
+ 3. Update: Â(z+dz) = exp(D̂·dz/2)·(Âᵢₚ + (k₁ + 2k₂ + 2k₃)/6) + k₄/6
+
+where:
+
+  - D̂ is the linear dispersion operator
+  - N̂[A] is the nonlinear operator (Kerr, Raman, shock)
+  - exp(D̂·dz/2) advances dispersion by half-step
 
 # Arguments
-- `du`: Output derivative
-- `u`: Current state (interaction picture)
-- `p`: Parameters tuple (linop, params, grid, RW, fft_plan, ifft_plan, exp_Lz_buffer, exp_mLz_buffer)
-- `z`: Current propagation distance [m]
-"""
-function gnlse_rhs!(du, u, p, z)
-    linop, params, grid, RW, fft_plan, ifft_plan, exp_Lz_buffer, exp_mLz_buffer = p
-    
-    # Pre-compute exponentials
-    @. exp_Lz_buffer = exp(linop * z)
-    @. exp_mLz_buffer = exp(-linop * z)
-    
-    # Transform back from interaction picture: A_w = u * exp(L*z)
-    @. du = u * exp_Lz_buffer
-    
-    # Transform to time domain
-    At = fft_plan * du
-    
-    # Calculate nonlinear RHS: N[A] = iγ|A|²·A
-    # nonlinear_operator returns iγ|A|², so multiply by A
-    nonlin_phase = nonlinear_operator(At, params, grid, RW)
-    nonlin = @. At * nonlin_phase
-    
-    # Transform back to frequency domain
-    du .= ifft_plan * nonlin
-    
-    # Apply interaction picture factor
-    @. du *= exp_mLz_buffer
-    
-    nothing
-end
 
-"""
-    gnlse_rhs_freq_gamma!(du, u, p, z)
+  - `pulse::Pulse`: Initial pulse with grid and fields
+  - `params::SimParams`: Simulation parameters including medium properties
 
-Right-hand side of M-GNLSE with frequency-dependent gamma (with scaling).
-Optimized - no conditionals in hot path.
+# Keyword Arguments
 
-# Arguments
-- `du`: Output derivative
-- `u`: Current state (pseudo-envelope in interaction picture)
-- `p`: Parameters tuple (linop, params, grid, RW, fft_plan, ifft_plan, scaling, 
-                         inv_scaling, exp_Lz_buffer, exp_mLz_buffer, Aw_buffer)
-- `z`: Current propagation distance [m]
-"""
-function gnlse_rhs_freq_gamma!(du, u, p, z)
-    linop, gamma_im_vec, omega0_inv, fr, one_minus_fr, omega, fft_plan, ifft_plan, RW, raman, shock,
-        scaling, inv_scaling, exp_Lz_buffer, exp_mLz_buffer, Aw_buffer, At_buffer, It_buffer, nonlin_w = p
-    
-    # Pre-compute exponentials
-    @. exp_Lz_buffer = exp(linop * z)
-    @. exp_mLz_buffer = exp(-linop * z)
-    
-    # Transform from interaction picture: Aw_pseudo = u * exp(L*z)
-    @. du = u * exp_Lz_buffer
-    
-    # Remove scaling: Aw = Aw_pseudo / scaling
-    @. Aw_buffer = du * inv_scaling
-    
-    # Transform to time domain (in-place)
-    mul!(At_buffer, fft_plan, Aw_buffer)
-    
-    # Calculate nonlinear operator inline (Kerr-only, optimized)
-    @. It_buffer = abs2(At_buffer)
-    @. At_buffer *= It_buffer  # Reuse At_buffer for nonlin_t
-    
-    # Transform to frequency domain (in-place)
-    mul!(nonlin_w, ifft_plan, At_buffer)
-    @. nonlin_w *= gamma_im_vec
-    
-    # Apply scaling: result is for pseudo-envelope
-    @. nonlin_w *= scaling
-    
-    # Apply interaction picture factor
-    @. du = nonlin_w * exp_mLz_buffer
-    
-    nothing
-end
-
-"""
-    gnlse_rhs_freq_gamma_no_scaling!(du, u, p, z)
-
-Right-hand side of M-GNLSE with frequency-dependent gamma (without scaling).
-Optimized - no conditionals in hot path.
-"""
-function gnlse_rhs_freq_gamma_no_scaling!(du, u, p, z)
-    linop, gamma_im_vec, omega0_inv, fr, one_minus_fr, omega, fft_plan, ifft_plan, RW, raman, shock,
-        exp_Lz_buffer, exp_mLz_buffer, At_buffer, It_buffer, nonlin_w = p
-    
-    # Pre-compute exponentials
-    @. exp_Lz_buffer = exp(linop * z)
-    @. exp_mLz_buffer = exp(-linop * z)
-    
-    # Transform from interaction picture
-    @. du = u * exp_Lz_buffer
-    
-    # Transform to time domain (in-place)
-    mul!(At_buffer, fft_plan, du)
-    
-    # Calculate nonlinear operator inline (Kerr-only, optimized)
-    @. It_buffer = abs2(At_buffer)
-    @. At_buffer *= It_buffer  # Reuse At_buffer for nonlin_t
-    
-    # Transform to frequency domain (in-place)
-    mul!(nonlin_w, ifft_plan, At_buffer)
-    @. nonlin_w *= gamma_im_vec
-    
-    # Apply interaction picture factor
-    @. du = nonlin_w * exp_mLz_buffer
-    
-    nothing
-end
-
-"""
-    propagate_rk4ip(pulse::Pulse, params::SimParams; progress::Bool=true)
-
-Propagate pulse using RK4 in the Interaction Picture (RK4IP) with adaptive stepping.
-
-Uses OrdinaryDiffEq.jl for efficient integration with error control.
-Automatically detects and handles frequency-dependent gamma using M-GNLSE pseudo-envelope method.
-Optimized with pre-allocated buffers and no conditionals in hot path.
-
-# Arguments
-- `pulse::Pulse`: Initial pulse
-- `params::SimParams`: Simulation parameters
-- `progress::Bool`: Show progress bar (default: true)
+  - `progress::Bool=true`: Print progress messages
+  - `n_steps::Int=1000`: Number of propagation steps (fixed step size = length/n_steps)
 
 # Returns
-- `Tuple{Vector{Float64}, Matrix{ComplexF64}, Matrix{ComplexF64}}`: (z, At, Aw)
+
+  - `z_out`: Array of z positions [m]
+  - `At_out`: Time-domain field at each save point [√W]
+  - `Aw_out`: Frequency-domain field at each save point [√W·s]
 
 # Notes
-For frequency-dependent gamma, the solver applies the Lægsgaard (2007) pseudo-envelope
-transformation if a scaling factor is provided in the Medium structure.
+
+  - Fixed step size dz = medium.length / n_steps
+  - No adaptive stepping - user must choose n_steps carefully
+  - For adaptive stepping, use `propagate_erk4ip` instead
+  - Step size should satisfy: dz << Lₙₗ, Lᴅ for accuracy
+
+# Example
+
+```julia
+grid = create_grid(2^12, 10e-12, 835e-9)
+medium = Medium(0.15, 0.11, [-11.83e-27, 8.11e-41], 0.0, 835e-9)
+pulse = sech_pulse(grid, 50e-15, 10000.0)
+params = SimParams(; medium=medium, n_saves=200, raman=true, shock=true)
+
+# Fixed step size: 150mm / 5000 steps equals 30μm per step
+z, At, Aw = propagate_rk4ip(pulse, params; n_steps=5000)
+```
+
+# See Also
+
+  - [`propagate_erk4ip`](@ref): Adaptive variant with embedded error estimation
+  - [`propagate_ssfm`](@ref): Simpler split-step Fourier method
+
+# Reference
+
+J. Hult, "A Fourth-Order Runge–Kutta in the Interaction Picture Method for
+Simulating Supercontinuum Generation in Optical Fibers," J. Lightwave Technol.
+25(12), 3770-3775 (2007). DOI: 10.1109/JLT.2007.909373
 """
-function propagate_rk4ip(pulse::Pulse, params::SimParams; progress::Bool=true)
-    # Setup
+function propagate_rk4ip(
+    pulse::Pulse,
+    params::SimParams;
+    progress::Bool=true,
+    n_steps::Union{Int, Nothing}=nothing,
+    dz::Union{Float64, Nothing}=nothing,
+)
     grid = pulse.grid
     medium = params.medium
     N = grid.N
-    
-    # Dispersion operator
-    linop = dispersion_operator(grid, medium)
-    
-    # Raman response (if needed)
-    RW = nothing
-    if params.raman
-        h_R, _ = raman_response(grid, params.raman_model)
-        RW = raman_response_frequency(h_R, grid)
+    z_end = medium.length
+    n_saves = params.n_saves
+
+    # Determine n_steps from dz if provided
+    if dz !== nothing
+        n_steps = round(Int, z_end / dz)
+    elseif n_steps === nothing
+        # Use params.dz as default
+        n_steps = round(Int, z_end / params.dz)
     end
-    
-    # FFT plans
-    fft_plan = plan_fft(pulse.At)
-    ifft_plan = plan_ifft(pulse.Aw)
-    
-    # Determine if using frequency-dependent gamma
-    is_freq_gamma = medium.gamma isa Vector
-    scaling = medium.scaling
-    
-    # Pre-allocate buffers (avoid allocations in hot path)
-    exp_Lz_buffer = similar(pulse.Aw)
-    exp_mLz_buffer = similar(pulse.Aw)
-    
-    # Initial condition and RHS function selection
-    local u0, p, rhs!
-    
-    if is_freq_gamma
-        # Pre-compute constants for frequency-dependent gamma
-        gamma_im_vec = im .* medium.gamma
-        omega0 = 2π * 3e8 / medium.lambda0
-        omega0_inv = 1.0 / omega0
-        fr = params.fr
-        one_minus_fr = 1.0 - fr
-        omega = grid.omega
-        raman = params.raman
-        shock = params.shock
-        
-        # Pre-allocate buffers for nonlinearity computation
-        At_buffer = similar(pulse.At)           # Time-domain field
-        It_buffer = similar(pulse.At, Float64)  # Real intensity
-        nonlin_w = similar(pulse.Aw)            # Frequency-domain nonlinear term
-        
-        if scaling !== nothing
-            # With scaling - fully optimized path
-            u0 = copy(pulse.Aw) .* scaling
-            inv_scaling = 1.0 ./ scaling  # Pre-compute inverse
-            Aw_buffer = similar(pulse.Aw)
-            p = (linop, gamma_im_vec, omega0_inv, fr, one_minus_fr, omega, fft_plan, ifft_plan, 
-                 RW, raman, shock, scaling, inv_scaling, exp_Lz_buffer, exp_mLz_buffer, Aw_buffer,
-                 At_buffer, It_buffer, nonlin_w)
-            rhs! = gnlse_rhs_freq_gamma!
-        else
-            # Without scaling
-            u0 = copy(pulse.Aw)
-            p = (linop, gamma_im_vec, omega0_inv, fr, one_minus_fr, omega, fft_plan, ifft_plan,
-                 RW, raman, shock, exp_Lz_buffer, exp_mLz_buffer, At_buffer, It_buffer, nonlin_w)
-            rhs! = gnlse_rhs_freq_gamma_no_scaling!
-        end
-    else
-        # Scalar gamma
-        u0 = copy(pulse.Aw)
-        p = (linop, params, grid, RW, fft_plan, ifft_plan, exp_Lz_buffer, exp_mLz_buffer)
-        rhs! = gnlse_rhs!
-    end
-    
-    tspan = (0.0, medium.length)
-    
-    # Solve ODE
-    prob = ODEProblem(rhs!, u0, tspan, p)
-    sol = OrdinaryDiffEq.solve(prob, DP5(), 
-                reltol=params.reltol, 
-                abstol=params.abstol,
-                saveat=range(0, medium.length, length=params.n_saves),
-                progress=progress)
-    
-    # Extract solution
-    z_array = sol.t
-    n_saves = length(z_array)
-    
-    # Transform back from interaction picture and organize output
+
+    # Build physics model once
+    model = build_physics_model(grid, params)
+
+    # Initial condition in frequency domain
+    U = copy(pulse.Aw)
+
+    # Fixed step size
+    dz = z_end / n_steps
+
+    # Storage for output
+    z_out = zeros(n_saves)
     At_out = zeros(ComplexF64, N, n_saves)
     Aw_out = zeros(ComplexF64, N, n_saves)
-    
-    # Post-processing based on solver type
-    if is_freq_gamma && scaling !== nothing
-        inv_scaling = 1.0 ./ scaling
-        for i in 1:n_saves
-            z = z_array[i]
-            u = sol.u[i]
-            @. exp_Lz_buffer = exp(linop * z)
-            Aw_pseudo = @. u * exp_Lz_buffer
-            @. Aw_out[:, i] = Aw_pseudo * inv_scaling
-            At_out[:, i] = fft_plan * Aw_out[:, i]
-        end
-    elseif is_freq_gamma
-        for i in 1:n_saves
-            z = z_array[i]
-            u = sol.u[i]
-            @. exp_Lz_buffer = exp(linop * z)
-            @. Aw_out[:, i] = u * exp_Lz_buffer
-            At_out[:, i] = fft_plan * Aw_out[:, i]
-        end
+
+    # Save initial condition
+    z_out[1] = 0.0
+    At_out[:, 1] .= pulse.At
+    Aw_out[:, 1] .= U
+
+    # Determine save interval
+    save_interval = n_steps ÷ (n_saves - 1)
+    z = 0.0
+    save_idx = 2
+
+    # Pre-allocate workspace
+    e = similar(U)              # exp(D̂·dz/2)
+    Uip = similar(U)            # U in interaction picture
+    k1 = similar(U)             # RK stage 1
+    k2 = similar(U)             # RK stage 2
+    k3 = similar(U)             # RK stage 3
+    k4 = similar(U)             # RK stage 4
+    NU = similar(U)             # Nonlinear operator N̂[U]
+    At_temp = similar(pulse.At) # Time-domain buffer
+    Aw_temp = similar(U)        # Frequency-domain buffer
+
+    # Initial nonlinearity: N̂[A(z=0)]
+    mul!(At_temp, model.ifftp, U)
+    NU .= model.nonlinear_function(At_temp, model)
+
+    # Linear half-step operator (constant for fixed dz)
+    @. e = exp(0.5 * dz * model.dispersion_term)
+
+    # Initialize progress bar
+    prog = if progress
+        Progress(n_steps; desc="RK4IP (dz=$(round(dz*1e6, digits=1))μm): ", showspeed=true)
     else
-        for i in 1:n_saves
-            z = z_array[i]
-            u = sol.u[i]
-            @. exp_Lz_buffer = exp(linop * z)
-            @. Aw_out[:, i] = u * exp_Lz_buffer
-            At_out[:, i] = fft_plan * Aw_out[:, i]
+        nothing
+    end
+
+    # Main propagation loop
+    for step in 1:n_steps
+        # ============================================================
+        # RK4IP Method - Hult (2007) Algorithm
+        # ============================================================
+
+        # Transform to interaction picture: Ûᵢₚ = exp(D̂·dz/2)·U
+        @. Uip = e * U
+
+        # Stage 1: k₁ = exp(D̂·dz/2)·N̂[A(z)]
+        @. k1 = e * NU
+
+        # Stage 2: k₂ = N̂[IFFT(Ûᵢₚ + dz·k₁/2)]
+        @. Aw_temp = Uip + 0.5 * dz * k1
+        mul!(At_temp, model.ifftp, Aw_temp)
+        k2 .= model.nonlinear_function(At_temp, model)
+
+        # Stage 3: k₃ = N̂[IFFT(Ûᵢₚ + dz·k₂/2)]
+        @. Aw_temp = Uip + 0.5 * dz * k2
+        mul!(At_temp, model.ifftp, Aw_temp)
+        k3 .= model.nonlinear_function(At_temp, model)
+
+        # Stage 4: k₄ = N̂[IFFT(exp(D̂·dz/2)·(Ûᵢₚ + dz·k₃))]
+        @. Aw_temp = e * (Uip + dz * k3)
+        mul!(At_temp, model.ifftp, Aw_temp)
+        k4 .= model.nonlinear_function(At_temp, model)
+
+        # Update solution: U(z+dz) = exp(D̂·dz/2)·(Ûᵢₚ + dz·(k₁ + 2k₂ + 2k₃)/6) + dz·k₄/6
+        @. U = e * (Uip + dz * (k1 + 2.0 * k2 + 2.0 * k3) / 6.0) + dz * k4 / 6.0
+
+        # Update nonlinearity for next step (FSAL property)
+        mul!(At_temp, model.ifftp, U)
+        NU .= model.nonlinear_function(At_temp, model)
+
+        # Advance position
+        z += dz
+
+        # Update progress bar
+        if !isnothing(prog)
+            update!(prog, step)
+        end
+
+        # Save if at save point
+        if step % save_interval == 0 && save_idx <= n_saves
+            z_out[save_idx] = z
+            copyto!(@view(Aw_out[:, save_idx]), U)
+            # Transform to time domain and shift to natural order
+            mul!(At_temp, model.ifftp, U)
+            At_out[:, save_idx] .= fftshift(At_temp)
+            save_idx += 1
         end
     end
-    
-    (z_array, At_out, Aw_out)
+
+    # Ensure final point is saved
+    if save_idx <= n_saves
+        z_out[save_idx] = z_end
+        copyto!(@view(Aw_out[:, save_idx]), U)
+        # Transform to time domain and shift to natural order
+        mul!(At_temp, model.ifftp, U)
+        At_out[:, save_idx] .= fftshift(At_temp)
+    end
+
+    if progress
+        println("RK4IP propagation complete")
+    end
+
+    return z_out, At_out, Aw_out
 end
