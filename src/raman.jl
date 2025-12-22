@@ -8,11 +8,13 @@ BlowWood (τ₁=12.2 fs, τ₂=32 fs, fᵣ=0.18), LinAgrawal (three-component wi
 fᵣ=0.245), Hollenbeck (13-oscillator fit to experimental data, fᵣ≈0.20).
 
 # Arguments
-- `grid::Grid`: Time-frequency grid
-- `model::RamanModel`: Raman model specification
+
+  - `grid::Grid`: Time-frequency grid
+  - `model::RamanModel`: Raman model specification
 
 # Returns
-- `(h_R, fr)`: Normalized response function [unitless] and Raman fraction fᵣ [unitless]
+
+  - `(h_R, fr)`: Normalized response function [unitless] and Raman fraction fᵣ [unitless]
 """
 function raman_response(grid::Grid, model::BlowWood)
     τ1 = 12.2e-15  # s
@@ -23,7 +25,7 @@ function raman_response(grid::Grid, model::BlowWood)
 
     for (i, t) in enumerate(grid.t)
         if t >= 0
-            h_R[i] = (τ1^2 + τ2^2) / (τ1 * τ2^2) * exp(-t/τ2) * sin(t/τ1)
+            h_R[i] = (τ1^2 + τ2^2) / (τ1 * τ2^2) * exp(-t / τ2) * sin(t / τ1)
         end
     end
 
@@ -54,10 +56,10 @@ function raman_response(grid::Grid, model::LinAgrawal)
     for (i, t) in enumerate(grid.t)
         if t >= 0
             # Single-Lorentzian component (Blow-Wood form)
-            h_single = (τ1^2 + τ2^2) / (τ1 * τ2^2) * exp(-t/τ2) * sin(t/τ1)
+            h_single = (τ1^2 + τ2^2) / (τ1 * τ2^2) * exp(-t / τ2) * sin(t / τ1)
 
             # Boson peak component (damped exponential)
-            h_boson = (2τb - t) / τb^2 * exp(-t/τb)
+            h_boson = (2τb - t) / τb^2 * exp(-t / τb)
 
             # Combined response with weighting
             h_R[i] = (1 - fb) * h_single + fb * h_boson
@@ -83,19 +85,19 @@ function raman_response(grid::Grid, model::Hollenbeck)
 
     # Oscillator parameters [frequency (THz), damping (THz), amplitude (normalized)]
     oscillators = [
-        (15.6,  0.50,  0.010),  # Mode 1
-        (13.35, 0.70,  0.048),  # Mode 2
-        (12.15, 0.55,  0.092),  # Mode 3  - dominant peak
-        (11.40, 0.40,  0.057),  # Mode 4
-        (10.35, 0.35,  0.038),  # Mode 5
-        (9.15,  0.32,  0.025),  # Mode 6
-        (8.70,  0.28,  0.018),  # Mode 7
-        (7.80,  0.25,  0.012),  # Mode 8
-        (6.52,  0.23,  0.008),  # Mode 9
-        (5.82,  0.20,  0.005),  # Mode 10
-        (4.50,  0.18,  0.003),  # Mode 11
-        (3.25,  0.15,  0.002),  # Mode 12 - low frequency tail
-        (1.75,  0.10,  0.001),  # Mode 13 - Boson peak region
+        (15.6, 0.50, 0.010),  # Mode 1
+        (13.35, 0.70, 0.048),  # Mode 2
+        (12.15, 0.55, 0.092),  # Mode 3  - dominant peak
+        (11.40, 0.40, 0.057),  # Mode 4
+        (10.35, 0.35, 0.038),  # Mode 5
+        (9.15, 0.32, 0.025),  # Mode 6
+        (8.70, 0.28, 0.018),  # Mode 7
+        (7.80, 0.25, 0.012),  # Mode 8
+        (6.52, 0.23, 0.008),  # Mode 9
+        (5.82, 0.20, 0.005),  # Mode 10
+        (4.50, 0.18, 0.003),  # Mode 11
+        (3.25, 0.15, 0.002),  # Mode 12 - low frequency tail
+        (1.75, 0.10, 0.001),  # Mode 13 - Boson peak region
     ]
 
     h_R = zeros(Float64, grid.N)
@@ -134,11 +136,13 @@ conj(fft(ifftshift(h_R))) where ifftshift aligns zero-time for FFT and conjugate
 matches established solver conventions.
 
 # Arguments
-- `h_R::Vector{Float64}`: Time-domain Raman response [unitless]
-- `grid::Grid`: Time-frequency grid
+
+  - `h_R::Vector{Float64}`: Time-domain Raman response [unitless]
+  - `grid::Grid`: Time-frequency grid
 
 # Returns
-- `Vector{ComplexF64}`: Frequency-domain response R̃(ω) [unitless]
+
+  - `Vector{ComplexF64}`: Frequency-domain response R̃(ω) [unitless]
 """
 function raman_response_frequency(h_R::Vector{Float64}, grid::Grid)
     # FFT of Raman response for convolution theorem: F{f ⊗ h} = F{f} × F{h}

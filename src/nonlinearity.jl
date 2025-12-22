@@ -10,15 +10,16 @@ using FFTW
 Precomputed physics operators and FFT plans for GNLSE propagation.
 
 # Fields
-- `dispersion_term`: D̂(ω) = -α/2 + i∑(βₙ/n!)(iω)ⁿ
-- `fftp`, `ifftp`: Forward and inverse FFT plans
-- `γ`: Nonlinear coefficient [1/(W·m)] (scalar or frequency-dependent vector)
-- `ω`: Angular frequency grid [rad/s]
-- `ω0`: Central angular frequency [rad/s]
-- `dt`: Time step [s]
-- `fr`: Raman fraction
-- `raman_freq_response`: h̃ᵣ(ω) in frequency domain
-- `nonlinear_function`: Selected nonlinearity operator
+
+  - `dispersion_term`: D̂(ω) = -α/2 + i∑(βₙ/n!)(iω)ⁿ
+  - `fftp`, `ifftp`: Forward and inverse FFT plans
+  - `γ`: Nonlinear coefficient [1/(W·m)] (scalar or frequency-dependent vector)
+  - `ω`: Angular frequency grid [rad/s]
+  - `ω0`: Central angular frequency [rad/s]
+  - `dt`: Time step [s]
+  - `fr`: Raman fraction
+  - `raman_freq_response`: h̃ᵣ(ω) in frequency domain
+  - `nonlinear_function`: Selected nonlinearity operator
 """
 struct PhysicsModel
     dispersion_term::Vector{ComplexF64}
@@ -163,9 +164,10 @@ end
 Select nonlinear operator at compile time for zero-overhead dispatch.
 
 # Arguments
-- `shock`: Include self-steepening
-- `raman`: Include Raman scattering
-- `freq_dependent`: Use frequency-dependent γ(ω) (M-GNLSE)
+
+  - `shock`: Include self-steepening
+  - `raman`: Include Raman scattering
+  - `freq_dependent`: Use frequency-dependent γ(ω) (M-GNLSE)
 
 Returns function reference to appropriate nonlinear operator.
 """
@@ -257,9 +259,10 @@ Compute nonlinear operator N̂[A] = iγ[(1-fᵣ)|A|² + fᵣ(|A|² ⊗ hᵣ) + (
 Legacy interface wrapping `PhysicsModel` approach for backward compatibility.
 
 # Arguments
-- `At`: Time-domain field amplitude
-- `grid`: Grid structure with FFT plans, dt, omega
-- `params`: SimParams with raman/shock flags and medium parameters
+
+  - `At`: Time-domain field amplitude
+  - `grid`: Grid structure with FFT plans, dt, omega
+  - `params`: SimParams with raman/shock flags and medium parameters
 
 Returns nonlinear operator in frequency domain for split-step integration.
 """
@@ -398,16 +401,17 @@ Compute M-GNLSE nonlinear operator with frequency-dependent γ(ω).
 Uses Lægsgaard (2007) pseudo-envelope method: ∂C/∂z = [iβ(ω) - α/2]C + iγ(ω)F{|F⁻¹{C}|²F⁻¹{C}}.
 
 # Arguments
-- `At`: Time-domain pseudo-envelope C(t)
-- `gamma_im_vec`: iγ(ω) vector [1/(W·m)]
-- `omega0_inv`: 1/ω₀ [s/rad] for shock term
-- `fr`: Raman fraction
-- `one_minus_fr`: 1 - fᵣ (precomputed)
-- `omega`: Frequency grid [rad/s]
-- `fft_plan`, `ifft_plan`: FFT plans
-- `RW`: h̃ᵣ(ω) Raman response or `nothing`
-- `raman`, `shock`: Effect flags
-- `dt`: Time step [s]
+
+  - `At`: Time-domain pseudo-envelope C(t)
+  - `gamma_im_vec`: iγ(ω) vector [1/(W·m)]
+  - `omega0_inv`: 1/ω₀ [s/rad] for shock term
+  - `fr`: Raman fraction
+  - `one_minus_fr`: 1 - fᵣ (precomputed)
+  - `omega`: Frequency grid [rad/s]
+  - `fft_plan`, `ifft_plan`: FFT plans
+  - `RW`: h̃ᵣ(ω) Raman response or `nothing`
+  - `raman`, `shock`: Effect flags
+  - `dt`: Time step [s]
 
 Returns nonlinear operator in frequency domain.
 Reference: Lægsgaard, Opt. Express 15, 16110 (2007).
@@ -463,9 +467,10 @@ end
 Apply nonlinear operator in-place via exponential step: Aₜ ← Aₜ·exp(N̂·dz).
 
 # Arguments
-- `At`: Time-domain field (modified in-place)
-- `nonlin`: Nonlinear operator
-- `dz`: Propagation step [m]
+
+  - `At`: Time-domain field (modified in-place)
+  - `nonlin`: Nonlinear operator
+  - `dz`: Propagation step [m]
 """
 function apply_nonlinearity!(At::Vector{<:Complex}, nonlin::Vector{<:Complex}, dz::Real)
     @. At *= exp(nonlin * dz)
