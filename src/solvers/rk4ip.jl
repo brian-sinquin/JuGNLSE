@@ -14,79 +14,22 @@ using LinearAlgebra: mul!
 import ..build_physics_model, ..PhysicsModel
 
 """
-    propagate_rk4ip(pulse::Pulse, params::SimParams; progress::Bool=true, n_steps::Int=1000)
+    propagate_rk4ip(pulse::Pulse, params::SimParams; n_steps=1000, dz=nothing)
 
-Propagate pulse using 4th-order Runge-Kutta in Interaction Picture (RK4IP).
+4th-order Runge-Kutta in interaction picture with fixed step size.
 
-The RK4IP method from Hult (2007) splits the propagation into linear (dispersion)
-and nonlinear parts using the interaction picture transformation. Uses fixed step
-size unlike the adaptive ERK4IP solver.
+Fixed-step implementation of the RK4IP method. Step size is medium.length / n_steps
+unless `dz` is specified directly.
 
-# Algorithm
-
-For each step of size dz:
-
- 1. Transform to interaction picture: Âᵢₚ = exp(D̂·dz/2)·Â
-
- 2. Compute 4 RK stages:
-
-      + k₁ = exp(D̂·dz/2)·N̂[A(z)]
-      + k₂ = N̂[IFFT(Âᵢₚ + k₁/2)]
-      + k₃ = N̂[IFFT(Âᵢₚ + k₂/2)]
-      + k₄ = N̂[IFFT(exp(D̂·dz/2)·(Âᵢₚ + k₃))]
- 3. Update: Â(z+dz) = exp(D̂·dz/2)·(Âᵢₚ + (k₁ + 2k₂ + 2k₃)/6) + k₄/6
-
-where:
-
-  - D̂ is the linear dispersion operator
-  - N̂[A] is the nonlinear operator (Kerr, Raman, shock)
-  - exp(D̂·dz/2) advances dispersion by half-step
-
-# Arguments
-
-  - `pulse::Pulse`: Initial pulse with grid and fields
-  - `params::SimParams`: Simulation parameters including medium properties
-
-# Keyword Arguments
-
-  - `progress::Bool=true`: Print progress messages
-  - `n_steps::Int=1000`: Number of propagation steps (fixed step size = length/n_steps)
+# Parameters
+- `n_steps`: Number of propagation steps
+- `dz`: Step size [m] (overrides n_steps if provided)
 
 # Returns
-
-  - `z_out`: Array of z positions [m]
-  - `At_out`: Time-domain field at each save point [√W]
-  - `Aw_out`: Frequency-domain field at each save point [√W·s]
-
-# Notes
-
-  - Fixed step size dz = medium.length / n_steps
-  - No adaptive stepping - user must choose n_steps carefully
-  - For adaptive stepping, use `propagate_erk4ip` instead
-  - Step size should satisfy: dz << Lₙₗ, Lᴅ for accuracy
-
-# Example
-
-```julia
-grid = create_grid(2^12, 10e-12, 835e-9)
-medium = Medium(0.15, 0.11, [-11.83e-27, 8.11e-41], 0.0, 835e-9)
-pulse = sech_pulse(grid, 50e-15, 10000.0)
-params = SimParams(; medium=medium, n_saves=200, raman=true, shock=true)
-
-# Fixed step size: 150mm / 5000 steps equals 30μm per step
-z, At, Aw = propagate_rk4ip(pulse, params; n_steps=5000)
-```
-
-# See Also
-
-  - [`propagate_erk4ip`](@ref): Adaptive variant with embedded error estimation
-  - [`propagate_ssfm`](@ref): Simpler split-step Fourier method
+Tuple of (`z`, `At`, `Aw`): propagation distances, time and frequency domain fields
 
 # Reference
-
-J. Hult, "A Fourth-Order Runge–Kutta in the Interaction Picture Method for
-Simulating Supercontinuum Generation in Optical Fibers," J. Lightwave Technol.
-25(12), 3770-3775 (2007). DOI: 10.1109/JLT.2007.909373
+Hult (2007), J. Lightwave Technol. 25(12), 3770-3775
 """
 function propagate_rk4ip(
     pulse::Pulse,

@@ -20,74 +20,22 @@ using LinearAlgebra: mul!
 import ..build_physics_model, ..PhysicsModel
 
 """
-    propagate_ssfm(pulse::Pulse, params::SimParams;
-                   progress::Bool=true, adaptive::Bool=false,
-                   dz::Union{Float64,Nothing}=nothing)
+    propagate_ssfm(pulse::Pulse, params::SimParams; dz=nothing, adaptive=false)
 
-Propagate pulse using Symmetric Split-Step Fourier Method.
+Symmetric split-step Fourier method (2nd order).
 
-# Arguments
+Implements A(z+dz) = exp(D̂·dz/2) exp(N̂·dz) exp(D̂·dz/2) A(z), where D̂ and N̂ are
+dispersion and nonlinear operators.
 
-  - `pulse::Pulse`: Initial pulse
-  - `params::SimParams`: Simulation parameters
-  - `progress::Bool`: Show progress (default: true)
-  - `adaptive::Bool`: Use adaptive stepping (experimental, default: false)
-  - `dz::Union{Float64,Nothing}`: Fixed step size [m]. If `nothing`, auto-computed as L/(20*n_saves)
-
-# Algorithm
-
-Symmetric split-step method:
-
-```
-A(z+dz) = exp(D̂·dz/2) · [exp(N̂·dz) · A(z)] · exp(D̂·dz/2)
-```
-
-where:
-
-  - D̂ is dispersion operator (frequency domain)
-  - N̂ is nonlinear operator (time domain)
-
-# Step Size Recommendations
-
-  - **Conservative**: dz = L / (50 * n_saves) - very accurate but slow
-  - **Standard**: dz = L / (20 * n_saves) - good balance (default)
-  - **Fast**: dz = L / (10 * n_saves) - faster but check convergence
-  - **Adaptive** (experimental): Start with conservative, adjust based on local error
+# Parameters
+- `dz`: Step size [m] (auto-computed as L/(20·n_saves) if `nothing`)
+- `adaptive`: Use adaptive stepping (experimental)
 
 # Returns
+Tuple of (`z`, `At`, `Aw`): propagation distances, time and frequency domain fields
 
-Tuple of (z, At, Aw):
-
-  - `z::Vector{Float64}`: Propagation distances
-  - `At::Matrix{ComplexF64}`: Time-domain evolution
-  - `Aw::Matrix{ComplexF64}`: Frequency-domain evolution
-
-# Performance Notes
-
-SSFM typically requires 2-5x more steps than ERK4IP for same accuracy,
-but each step is simpler (3 FFTs vs 10 FFTs). Good for:
-
-  - Validation of ERK4IP results
-  - Very long propagation distances
-  - Highly nonlinear problems where adaptive ERK4IP struggles
-
-# Examples
-
-```julia
-# Fixed step SSFM (default)
-results = solve(pulse, params; method=:SSFM)
-
-# Custom step size
-results = solve(pulse, params; method=:SSFM, dz=1e-4)
-
-# Adaptive SSFM (experimental)
-results = solve(pulse, params; method=:SSFM, adaptive=true)
-```
-
-# See Also
-
-  - [`propagate_erk4ip`](@ref): Adaptive RK4 in interaction picture (recommended)
-  - [`build_physics_model`](@ref): Physics operators construction
+# Note
+Requires 2-5× more steps than ERK4IP for comparable accuracy, but simpler per step.
 """
 function propagate_ssfm(
     pulse::Pulse,
