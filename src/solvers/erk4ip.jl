@@ -26,18 +26,18 @@ dispersion operator, making the nonlinear evolution easier to integrate accurate
 
 # Parameters
 
-- `pulse::Pulse`: Initial pulse with time and frequency domain fields
-- `params::SimParams`: Simulation parameters including medium properties
-- `progress::Bool=true`: Show progress bar during propagation
-- `rtol::Float64=1e-6`: Relative error tolerance for adaptive stepping
-- `atol::Float64=1e-8`: Absolute error tolerance for adaptive stepping  
-- `dz::Union{Float64, Nothing}=nothing`: Initial step size [m], auto-selected if `nothing`
+  - `pulse::Pulse`: Initial pulse with time and frequency domain fields
+  - `params::SimParams`: Simulation parameters including medium properties
+  - `progress::Bool=true`: Show progress bar during propagation
+  - `rtol::Float64=1e-6`: Relative error tolerance for adaptive stepping
+  - `atol::Float64=1e-8`: Absolute error tolerance for adaptive stepping
+  - `dz::Union{Float64, Nothing}=nothing`: Initial step size [m], auto-selected if `nothing`
 
 # Returns
 
-- `z::Vector{Float64}`: Propagation distances [m]
-- `At::Matrix{ComplexF64}`: Time-domain field at each save point
-- `Aw::Matrix{ComplexF64}`: Frequency-domain field at each save point
+  - `z::Vector{Float64}`: Propagation distances [m]
+  - `At::Matrix{ComplexF64}`: Time-domain field at each save point
+  - `Aw::Matrix{ComplexF64}`: Frequency-domain field at each save point
 
 # Physics
 
@@ -56,16 +56,16 @@ Kerr nonlinearity, Raman scattering, and self-steepening (shock) effects.
 grid = create_grid(2^12, 10e-12, 835e-9)
 medium = Medium(1.0, 0.1, [-11.8e-27, 8.1e-41], 0.0, 835e-9)
 pulse = sech_pulse(grid, 50e-15, 10000.0, 835e-9)
-params = SimParams(medium=medium, n_saves=200, raman=true, shock=true)
+params = SimParams(; medium=medium, n_saves=200, raman=true, shock=true)
 
-z, At, Aw = propagate_erk4ip(pulse, params, rtol=1e-6)
+z, At, Aw = propagate_erk4ip(pulse, params; rtol=1e-6)
 ```
 
 # See Also
 
-- [`propagate_rk4ip`](@ref): Fixed-step RK4IP for comparison
-- [`propagate_ssfm`](@ref): Classical split-step Fourier method
-- [`solve`](@ref): High-level interface that selects this solver by default
+  - [`propagate_rk4ip`](@ref): Fixed-step RK4IP for comparison
+  - [`propagate_ssfm`](@ref): Classical split-step Fourier method
+  - [`solve`](@ref): High-level interface that selects this solver by default
 
 # References
 
