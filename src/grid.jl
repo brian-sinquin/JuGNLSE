@@ -4,12 +4,14 @@
 Create time-frequency grid for GNLSE simulations.
 
 # Arguments
-- `N::Int`: Number of grid points (power of 2 recommended for FFT efficiency)
-- `time_window::Real`: Total time window [s]
-- `center_wavelength::Real`: Center wavelength [m]
+
+  - `N::Int`: Number of grid points (power of 2 recommended for FFT efficiency)
+  - `time_window::Real`: Total time window [s]
+  - `center_wavelength::Real`: Center wavelength [m]
 
 # Returns
-- `Grid`: Grid structure with time domain symmetric around t=0 spanning [-time_window/2, time_window/2), frequency domain as angular frequency detuning Δω = ω - ω₀ [rad/s], and resolution dt = time_window/N, dω = 2π/time_window.
+
+  - `Grid`: Grid structure with time domain symmetric around t=0 spanning [-time_window/2, time_window/2), frequency domain as angular frequency detuning Δω = ω - ω₀ [rad/s], and resolution dt = time_window/N, dω = 2π/time_window.
 """
 function create_grid(N::Int, time_window::Real, center_wavelength::Real)
     N > 0 || throw(ArgumentError("N must be positive"))
@@ -41,12 +43,14 @@ end
 Create grid using medium parameters with automatic time window estimation.
 
 # Arguments
-- `N::Int`: Number of grid points (power of 2 recommended)
-- `medium::Medium`: Medium parameters (extracts lambda0 for center frequency)
-- `time_window::Real`: Time window [s], defaults to 20 ps if not specified
+
+  - `N::Int`: Number of grid points (power of 2 recommended)
+  - `medium::Medium`: Medium parameters (extracts lambda0 for center frequency)
+  - `time_window::Real`: Time window [s], defaults to 20 ps if not specified
 
 # Returns
-- `Grid`: Grid structure configured for the specified medium
+
+  - `Grid`: Grid structure configured for the specified medium
 """
 function create_grid_from_medium(
     N::Int, medium::Medium; time_window::Union{Real, Nothing}=nothing

@@ -22,13 +22,16 @@ Fixed-step implementation of the RK4IP method. Step size is medium.length / n_st
 unless `dz` is specified directly.
 
 # Parameters
-- `n_steps`: Number of propagation steps
-- `dz`: Step size [m] (overrides n_steps if provided)
+
+  - `n_steps`: Number of propagation steps
+  - `dz`: Step size [m] (overrides n_steps if provided)
 
 # Returns
+
 Tuple of (`z`, `At`, `Aw`): propagation distances, time and frequency domain fields
 
 # Reference
+
 Hult (2007), J. Lightwave Technol. 25(12), 3770-3775
 """
 function propagate_rk4ip(

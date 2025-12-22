@@ -6,14 +6,14 @@ Generate hyperbolic secant pulse A(t) = √P₀ sech(t/T₀) exp(-iC(t/T₀)²/2
 
 # Arguments
 
-- `grid::Grid`: Time-frequency grid
-- `width::Real`: Pulse width [s] - FWHM if T0=false, 1/e half-width if T0=true
-- `power_peak::Real`: Peak power [W]
-- `center_wavelength::Real`: Center wavelength [m]
-- `T0::Bool`: Width interpretation flag (false=FWHM, true=1/e width)
-- `time_offset::Real`: Time offset from center [s]
-- `phase::Real`: Initial phase [rad]
-- `chirp::Real`: Linear chirp parameter C (0=transform-limited)
+  - `grid::Grid`: Time-frequency grid
+  - `width::Real`: Pulse width [s] - FWHM if T0=false, 1/e half-width if T0=true
+  - `power_peak::Real`: Peak power [W]
+  - `center_wavelength::Real`: Center wavelength [m]
+  - `T0::Bool`: Width interpretation flag (false=FWHM, true=1/e width)
+  - `time_offset::Real`: Time offset from center [s]
+  - `phase::Real`: Initial phase [rad]
+  - `chirp::Real`: Linear chirp parameter C (0=transform-limited)
 """
 function sech_pulse(
     grid::Grid,
@@ -56,13 +56,13 @@ Generate Gaussian pulse A(t) = √P₀ exp(-(t/T₀)²/2) exp(-iC(t/T₀)²/2).
 
 # Arguments
 
-- `grid::Grid`: Time-frequency grid
-- `duration::Real`: Pulse duration [s] - FWHM if T0=false, 1/e half-width if T0=true
-- `power_peak::Real`: Peak power [W]
-- `T0::Bool`: Width interpretation flag (false=FWHM, true=1/e width)
-- `time_offset::Real`: Time offset from center [s]
-- `phase::Real`: Initial phase [rad]
-- `chirp::Real`: Linear chirp parameter C
+  - `grid::Grid`: Time-frequency grid
+  - `duration::Real`: Pulse duration [s] - FWHM if T0=false, 1/e half-width if T0=true
+  - `power_peak::Real`: Peak power [W]
+  - `T0::Bool`: Width interpretation flag (false=FWHM, true=1/e width)
+  - `time_offset::Real`: Time offset from center [s]
+  - `phase::Real`: Initial phase [rad]
+  - `chirp::Real`: Linear chirp parameter C
 """
 function gaussian_pulse(
     grid::Grid,
@@ -104,9 +104,9 @@ Generate continuous wave pulse with constant amplitude A(t) = √P exp(iφ).
 
 # Arguments
 
-- `grid::Grid`: Time-frequency grid
-- `power::Real`: CW power [W]
-- `phase::Real`: Initial phase [rad]
+  - `grid::Grid`: Time-frequency grid
+  - `power::Real`: CW power [W]
+  - `phase::Real`: Initial phase [rad]
 """
 function cw_pulse(grid::Grid, power::Real; phase::Real=0.0)
     power >= 0 || throw(ArgumentError("Power must be non-negative"))
@@ -127,8 +127,8 @@ Create pulse from user-defined time-domain envelope. Computes frequency represen
 
 # Arguments
 
-- `grid::Grid`: Time-frequency grid
-- `At::Vector{<:Complex}`: Time-domain envelope [√W] (length must match grid.N)
+  - `grid::Grid`: Time-frequency grid
+  - `At::Vector{<:Complex}`: Time-domain envelope [√W] (length must match grid.N)
 """
 function custom_pulse(grid::Grid, At::Vector{<:Complex})
     length(At) == grid.N || throw(ArgumentError("At length must match grid size"))

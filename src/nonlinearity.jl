@@ -7,26 +7,18 @@ using FFTW
 """
     PhysicsModel
 
-Internal struct holding precomputed physics operators and FFT plans.
-Follows FiberNlse's GNLSEProblem pattern but adapted for JuGNLSE.
+Precomputed physics operators and FFT plans for GNLSE propagation.
 
 # Fields
-
-  - `dispersion_term::Vector{ComplexF64}`: D̂(ω) = -α/2 + i∑(βₙ/n!)(iω)ⁿ
-  - `fftp`: Forward FFT plan
-  - `ifftp`: Inverse FFT plan
-  - `γ::Union{Float64,Vector{ComplexF64}}`: Nonlinear coefficient [1/(W·m)], scalar or freq-dependent
-  - `ω::Vector{Float64}`: Angular frequency grid [rad/s]
-  - `ω0::Float64`: Central angular frequency [rad/s]
-  - `dt::Float64`: Time step [s]
-  - `fr::Float64`: Raman fractional contribution
-  - `raman_freq_response::Union{Vector{ComplexF64}, Nothing}`: h̃ᵣ(ω)
-  - `nonlinear_function::Function`: Selected nonlinearity operator
-
-# Notes
-
-  - Scalar `γ`: Standard GNLSE with constant nonlinearity
-  - Vector `γ`: M-GNLSE with frequency-dependent γ(ω) = i·γ_vec(ω) for computation
+- `dispersion_term`: D̂(ω) = -α/2 + i∑(βₙ/n!)(iω)ⁿ
+- `fftp`, `ifftp`: Forward and inverse FFT plans
+- `γ`: Nonlinear coefficient [1/(W·m)] (scalar or frequency-dependent vector)
+- `ω`: Angular frequency grid [rad/s]
+- `ω0`: Central angular frequency [rad/s]
+- `dt`: Time step [s]
+- `fr`: Raman fraction
+- `raman_freq_response`: h̃ᵣ(ω) in frequency domain
+- `nonlinear_function`: Selected nonlinearity operator
 """
 struct PhysicsModel
     dispersion_term::Vector{ComplexF64}
@@ -168,18 +160,14 @@ end
 """
     select_nonlinearity(shock::Bool, raman::Bool, freq_dependent::Bool)
 
-Select nonlinear operator at compile time (no runtime branching).
-Returns function reference for zero-overhead dispatch.
+Select nonlinear operator at compile time for zero-overhead dispatch.
 
 # Arguments
+- `shock`: Include self-steepening
+- `raman`: Include Raman scattering
+- `freq_dependent`: Use frequency-dependent γ(ω) (M-GNLSE)
 
-  - `shock::Bool`: Include self-steepening (shock term)
-  - `raman::Bool`: Include Raman scattering
-  - `freq_dependent::Bool`: Use frequency-dependent γ(ω) (M-GNLSE)
-
-# Returns
-
-Function reference to appropriate nonlinear operator.
+Returns function reference to appropriate nonlinear operator.
 """
 function select_nonlinearity(shock::Bool, raman::Bool, freq_dependent::Bool)
     if freq_dependent
@@ -210,15 +198,11 @@ end
 """
     build_physics_model(grid::Grid, params::SimParams)
 
-Construct PhysicsModel with precomputed operators and FFT plans.
-This follows FiberNlse's approach of building everything once.
+Construct `PhysicsModel` with precomputed operators and FFT plans.
+Automatically detects scalar γ (GNLSE) or frequency-dependent γ(ω) (M-GNLSE).
+FFT plans use FFTW.MEASURE for optimized execution.
 
-Automatically detects whether gamma is scalar (standard GNLSE) or
-frequency-dependent (M-GNLSE) and selects appropriate operators.
-
-# Returns
-
-  - `PhysicsModel`: Struct with all precomputed physics operators
+Returns `PhysicsModel` struct with all precomputed physics operators.
 """
 function build_physics_model(grid::Grid, params::SimParams)
     # Create FFT plans with MEASURE flag for optimized transforms
@@ -269,51 +253,15 @@ end
 """
     nonlinear_operator(At::Vector{<:Complex}, grid::Grid, params::SimParams)
 
-Legacy dispatcher for backward compatibility.
-Now wraps the PhysicsModel approach.
-
-# Mathematical Formulation
-
-The nonlinear contribution to GNLSE (in time domain):
-
-```
-∂A/∂z|_nonlinear = N̂[A]
-```
-
-where the operator N̂ includes:
-
- 1. **Kerr effect** (instantaneous electronic response):
-
-    ```
-    N_Kerr = iγ|A|²
-    ```
-
- 2. **Raman effect** (delayed molecular response):
-
-    ```
-    N_Raman = iγfᵣ ∫hᵣ(t-t')|A(t')|² dt' = iγfᵣ(|A|² ⊗ hᵣ)
-    ```
- 3. **Self-steepening** (shock term, frequency-dependent nonlinearity):
-
-    ```
-    N_shock = iγ/ω₀ · ∂/∂t[(1-fᵣ)|A|² + fᵣ(|A|² ⊗ hᵣ)]
-    ```
-
-Combined operator:
-
-```
-N̂[A] = iγ{[(1-fᵣ)|A|² + fᵣ(|A|² ⊗ hᵣ)] + (1/ω₀)∂[...]/∂t}
-```
+Compute nonlinear operator N̂[A] = iγ[(1-fᵣ)|A|² + fᵣ(|A|² ⊗ hᵣ) + (1/ω₀)∂[...]/∂t].
+Legacy interface wrapping `PhysicsModel` approach for backward compatibility.
 
 # Arguments
+- `At`: Time-domain field amplitude
+- `grid`: Grid structure with FFT plans, dt, omega
+- `params`: SimParams with raman/shock flags and medium parameters
 
-  - `At`: Time-domain field amplitude    # Ensure scalar gamma
-  - `grid`: Grid structure with FFT plans, dt, omega
-  - `params`: SimParams with raman/shock flags and medium parameters
-
-# Returns
-
-  - Nonlinear operator in **frequency domain** ready for ERK4IP solver    # Pre-compute constants
+Returns nonlinear operator in frequency domain for split-step integration.
 """
 function nonlinear_operator(At::Vector{<:Complex}, grid::Grid, params::SimParams)
     # Build model on the fly for legacy compatibility
@@ -329,7 +277,7 @@ end
 """
     nonlinear_freq_gamma_kerr(At, gamma_im_vec, fft_plan, ifft_plan)
 
-Pure Kerr with frequency-dependent γ(ω)
+Pure Kerr nonlinearity with frequency-dependent γ(ω): N̂[A] = F⁻¹[γ̃(ω)·F{A·|A|²}].
 """
 @inline function nonlinear_freq_gamma_kerr(
     At::Vector{<:Complex}, gamma_im_vec::Vector{<:Complex}, fft_plan, ifft_plan
@@ -342,9 +290,9 @@ Pure Kerr with frequency-dependent γ(ω)
 end
 
 """
-    nonlinear_freq_gamma_kerr_raman(At, gamma_im_vec, fr, one_minus_fr, RW, fft_plan, ifft_plan)
+    nonlinear_freq_gamma_kerr_raman(At, gamma_im_vec, fr, one_minus_fr, RW, fft_plan, ifft_plan, dt)
 
-Kerr + Raman with frequency-dependent γ(ω)
+Kerr + Raman with frequency-dependent γ(ω): N̂[A] = F⁻¹[γ̃(ω)·F{A·[(1-fᵣ)|A|² + fᵣ(|A|² ⊗ hᵣ)]}].
 """
 @inline function nonlinear_freq_gamma_kerr_raman(
     At::Vector{<:Complex},
@@ -371,7 +319,7 @@ end
 """
     nonlinear_freq_gamma_kerr_shock(At, gamma_im_vec, omega0_inv, omega, fft_plan, ifft_plan)
 
-Kerr + shock with frequency-dependent γ(ω)
+Kerr + self-steepening with frequency-dependent γ(ω): N̂[A] = F⁻¹[γ̃(ω)(1-ω/ω₀)·F{A·|A|²}].
 """
 @inline function nonlinear_freq_gamma_kerr_shock(
     At::Vector{<:Complex},
@@ -401,9 +349,10 @@ end
 
 """
     nonlinear_freq_gamma_kerr_raman_shock(At, gamma_im_vec, omega0_inv, fr, one_minus_fr,
-                                          RW, omega, fft_plan, ifft_plan)
+                                          RW, omega, fft_plan, ifft_plan, dt)
 
-Full nonlinearity with frequency-dependent γ(ω)
+Full nonlinearity with frequency-dependent γ(ω): Kerr + Raman + self-steepening.
+N̂[A] = F⁻¹[γ̃(ω)(1-ω/ω₀)·F{A·[(1-fᵣ)|A|² + fᵣ(|A|² ⊗ hᵣ)]}].
 """
 @inline function nonlinear_freq_gamma_kerr_raman_shock(
     At::Vector{<:Complex},
@@ -443,103 +392,25 @@ end
 
 """
     nonlinear_operator_frequency_dependent(At, gamma_im_vec, omega0_inv, fr, one_minus_fr,
-                                          omega, fft_plan, ifft_plan, RW, raman, shock)
+                                          omega, fft_plan, ifft_plan, RW, raman, shock, dt)
 
-Calculate the nonlinear operator for M-GNLSE with frequency-dependent gamma γ(ω).
-
-# Mathematical Background: M-GNLSE Pseudo-Envelope Method
-
-Standard GNLSE with frequency-dependent effective area Aeff(ω) leads to a time-domain
-convolution problem that is computationally expensive. The Lægsgaard (2007) method avoids
-this by using a **pseudo-envelope** C(z,ω) defined as:
-
-```
-C(z,ω) = A(z,ω) × [Aeff(ω₀)/Aeff(ω)]^(1/4)
-```
-
-where A(z,ω) is the physical field and the scaling factor compensates for dispersion of the
-mode profile. This transformation allows the GNLSE to be written as:
-
-```
-∂C/∂ω = [iβ(ω) - α(ω)/2]C + iγ(ω)F{|F⁻¹{C}|² F⁻¹{C}}
-```
-
-# Implementation Algorithm
-
- 1. **Input**: Pseudo-envelope C(t) in time domain (already scaled by caller)
- 2. **Nonlinear term**: Compute N(t) = |C(t)|² × C(t) in time domain
- 3. **Transform**: N(ω) = F{N(t)} via FFT
- 4. **Apply γ(ω)**: Multiply by iγ(ω) in frequency domain
- 5. **Output**: Frequency-domain nonlinear operator iγ(ω)N(ω)
-
-This avoids convolution while correctly handling frequency-dependent effective area.
+Compute M-GNLSE nonlinear operator with frequency-dependent γ(ω).
+Uses Lægsgaard (2007) pseudo-envelope method: ∂C/∂z = [iβ(ω) - α/2]C + iγ(ω)F{|F⁻¹{C}|²F⁻¹{C}}.
 
 # Arguments
+- `At`: Time-domain pseudo-envelope C(t)
+- `gamma_im_vec`: iγ(ω) vector [1/(W·m)]
+- `omega0_inv`: 1/ω₀ [s/rad] for shock term
+- `fr`: Raman fraction
+- `one_minus_fr`: 1 - fᵣ (precomputed)
+- `omega`: Frequency grid [rad/s]
+- `fft_plan`, `ifft_plan`: FFT plans
+- `RW`: h̃ᵣ(ω) Raman response or `nothing`
+- `raman`, `shock`: Effect flags
+- `dt`: Time step [s]
 
-  - `At::Vector{<:Complex}`: Time-domain pseudo-envelope C(t) (already scaled)
-  - `gamma_im_vec::Vector{<:Complex}`: iγ(ω) vector
-  - `omega0_inv::Float64`: 1/ω₀ for shock term
-  - `fr::Float64`: Raman fraction
-  - `one_minus_fr::Float64`: 1 - fᵣ (pre-computed)
-  - `omega::Vector{Float64}`: Frequency grid for derivatives
-  - `fft_plan`: Pre-allocated FFT plan
-  - `ifft_plan`: Pre-allocated IFFT plan
-  - `RW::Union{Vector{<:Complex},Nothing}`: Frequency-domain Raman response
-  - `raman::Bool`: Enable Raman effect
-  - `shock::Bool`: Enable self-steepening
-
-# Returns
-
-  - `Vector{ComplexF64}`: Nonlinear operator in frequency domain
-
-# Performance Optimization
-
-  - All parameters pre-computed by caller (no redundant calculations)
-  - Dispatches to specialized functions (no conditionals in hot path)
-  - In-place operations where possible
-  - FFT plans reused across calls
-
-# Key Difference from Scalar Gamma
-
-  - **Scalar γ**: Result is in time domain (iγ|A|²)
-  - **Vector γ(ω)**: Result is in frequency domain (iγ(ω)·F{|A|²A})
-  - This asymmetry is fundamental to avoiding time-domain convolution
-
-# Examples
-
-```julia
-# Setup (done once at initialization)
-gamma_im_vec = im .* medium.gamma  # γ(ω) vector
-omega0_inv = 1.0 / grid.omega0  # Use precomputed ω₀ from grid
-fr = params.fr
-one_minus_fr = 1.0 - fr
-
-# In propagation loop
-nonlin_w = nonlinear_operator_frequency_dependent(
-    At,
-    gamma_im_vec,
-    omega0_inv,
-    fr,
-    one_minus_fr,
-    grid.omega,
-    fft_plan,
-    ifft_plan,
-    RW,
-    params.raman,
-    params.shock,
-)
-# nonlin_w is in frequency domain, ready for integration
-```
-
-# References
-
-  - J. Lægsgaard, "Mode profile dispersion in the generalized nonlinear Schrödinger equation,"
-    Opt. Express 15, 16110-16123 (2007). DOI: 10.1364/OE.15.016110
-
-# See Also
-
-  - [`nonlinear_operator`](@ref): Scalar gamma version
-  - [`Medium`](@ref): Defines gamma and scaling vectors
+Returns nonlinear operator in frequency domain.
+Reference: Lægsgaard, Opt. Express 15, 16110 (2007).
 """
 function nonlinear_operator_frequency_dependent(
     At::Vector{<:Complex},
@@ -589,13 +460,12 @@ end
 """
     apply_nonlinearity!(At::Vector{<:Complex}, nonlin::Vector{<:Complex}, dz::Real)
 
-Apply nonlinear operator in-place (simple exponential step).
+Apply nonlinear operator in-place via exponential step: Aₜ ← Aₜ·exp(N̂·dz).
 
 # Arguments
-
-  - `At::Vector{<:Complex}`: Time-domain field (modified in-place)
-  - `nonlin::Vector{<:Complex}`: Nonlinear operator
-  - `dz::Real`: Propagation step [m]
+- `At`: Time-domain field (modified in-place)
+- `nonlin`: Nonlinear operator
+- `dz`: Propagation step [m]
 """
 function apply_nonlinearity!(At::Vector{<:Complex}, nonlin::Vector{<:Complex}, dz::Real)
     @. At *= exp(nonlin * dz)

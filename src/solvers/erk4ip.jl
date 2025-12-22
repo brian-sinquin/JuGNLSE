@@ -19,13 +19,16 @@ Solves ∂U/∂z = exp(-D̂z) N̂[exp(D̂z)U] using a 4th-order method with 3rd-
 embedded error estimation for step size control.
 
 # Parameters
-- `rtol`, `atol`: Error tolerances for adaptive stepping
-- `dz`: Initial step size [m] (auto-selected if `nothing`)
+
+  - `rtol`, `atol`: Error tolerances for adaptive stepping
+  - `dz`: Initial step size [m] (auto-selected if `nothing`)
 
 # Returns
+
 Tuple of (`z`, `At`, `Aw`): propagation distances, time and frequency domain fields
 
 # Reference
+
 Heidt (2009), J. Lightwave Technol. 27(18)
 """
 function propagate_erk4ip(

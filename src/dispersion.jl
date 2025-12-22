@@ -4,11 +4,11 @@
 Construct the linear dispersion operator L̂(ω) = iβ(ω) - α(ω)/2 for GNLSE propagation.
 
 Computes the frequency-domain operator for the linear part of the GNLSE using Taylor expansion
-β(ω) = Σₙ₌₂^∞ (βₙ/n!)(ω-ω₀)ⁿ about the carrier frequency ω₀. The β₀ and β₁ terms are omitted 
+β(ω) = Σₙ₌₂^∞ (βₙ/n!)(ω-ω₀)ⁿ about the carrier frequency ω₀. The β₀ and β₁ terms are omitted
 as they represent global phase and group delay. Array indexing: `betas[1]` = β₂, `betas[2]` = β₃.
 Loss α must be in Nepers/m. Returns `Vector{ComplexF64}` of length `grid.N` in units [m⁻¹].
 
-Positive β₂ indicates normal dispersion; negative β₂ indicates anomalous dispersion enabling 
+Positive β₂ indicates normal dispersion; negative β₂ indicates anomalous dispersion enabling
 soliton propagation. Higher-order terms (β₃, β₄) introduce spectral asymmetry and pulse distortion.
 """
 function dispersion_operator(grid::Grid, medium::Medium)
@@ -41,12 +41,12 @@ end
 
 Apply linear dispersion operator to frequency-domain field in-place via Ã_out(ω) = Ã_in(ω) × exp(L̂(ω) × dz).
 
-Modifies `Aw` directly using zero-allocation broadcasting. Typically called hundreds to thousands of 
+Modifies `Aw` directly using zero-allocation broadcasting. Typically called hundreds to thousands of
 times per simulation in split-step propagation schemes. Returns `nothing`. O(N) complexity where N is grid size.
 
-- `Aw`: Frequency-domain field [√W·s], modified in-place
-- `linop`: Linear operator L̂(ω) = iβ(ω) - α(ω)/2 [m⁻¹]
-- `dz`: Propagation step [m]
+  - `Aw`: Frequency-domain field [√W·s], modified in-place
+  - `linop`: Linear operator L̂(ω) = iβ(ω) - α(ω)/2 [m⁻¹]
+  - `dz`: Propagation step [m]
 """
 function apply_dispersion!(Aw::Vector{<:Complex}, linop::Vector{<:Complex}, dz::Real)
     @. Aw *= exp(linop * dz)

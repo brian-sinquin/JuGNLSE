@@ -29,9 +29,9 @@ const GAUSSIAN_FWHM_TO_T0 = 2 * sqrt(log(2))  # ≈ 1.6651
 
 Convert loss coefficient between unit systems. Conversions: α[Np] = α[dB]·ln(10)/10.
 
-- `value`: Loss coefficient
-- `from`: (scale, length) where scale is `:dB` or `:linear`, length is `:km`, `:m`, `:cm`, `:mm`
-- `to`: Target units in same format
+  - `value`: Loss coefficient
+  - `from`: (scale, length) where scale is `:dB` or `:linear`, length is `:km`, `:m`, `:cm`, `:mm`
+  - `to`: Target units in same format
 
 Returns converted loss value.
 """
@@ -111,9 +111,9 @@ frequency_to_wavelength(freq::Real) = SPEED_OF_LIGHT / freq
 
 Peak power [W] for fundamental (N=1) soliton: P₀ = |β₂|/(γT₀²).
 
-- `beta2`: Second-order dispersion [s²/m]
-- `gamma`: Nonlinear coefficient [1/(W·m)]
-- `T0`: Pulse duration (1/e half-width) [s]
+  - `beta2`: Second-order dispersion [s²/m]
+  - `gamma`: Nonlinear coefficient [1/(W·m)]
+  - `T0`: Pulse duration (1/e half-width) [s]
 """
 function calculate_soliton_power(beta2::Real, gamma::Real, T0::Real)
     abs(beta2) / (gamma * T0^2)
@@ -124,10 +124,10 @@ end
 
 Soliton order from pulse parameters: N² = (γP₀T₀²)/|β₂|.
 
-- `P_peak`: Peak power [W]
-- `beta2`: Second-order dispersion [s²/m]
-- `gamma`: Nonlinear coefficient [1/(W·m)]
-- `T0`: Pulse duration (1/e half-width) [s]
+  - `P_peak`: Peak power [W]
+  - `beta2`: Second-order dispersion [s²/m]
+  - `gamma`: Nonlinear coefficient [1/(W·m)]
+  - `T0`: Pulse duration (1/e half-width) [s]
 """
 function soliton_order(P_peak::Real, beta2::Real, gamma::Real, T0::Real)
     sqrt(gamma * P_peak * T0^2 / abs(beta2))
@@ -138,8 +138,8 @@ end
 
 Dispersion length [m]: L_D = T₀²/|β₂|.
 
-- `T0`: Pulse duration (1/e half-width) [s]
-- `beta2`: Second-order dispersion [s²/m]
+  - `T0`: Pulse duration (1/e half-width) [s]
+  - `beta2`: Second-order dispersion [s²/m]
 """
 function dispersion_length(T0::Real, beta2::Real)
     T0^2 / abs(beta2)
@@ -150,8 +150,8 @@ end
 
 Nonlinear length [m]: L_NL = 1/(γP₀).
 
-- `gamma`: Nonlinear coefficient [1/(W·m)]
-- `P0`: Peak power [W]
+  - `gamma`: Nonlinear coefficient [1/(W·m)]
+  - `P0`: Peak power [W]
 """
 function nonlinear_length(gamma::Real, P0::Real)
     1.0 / (gamma * P0)
@@ -162,8 +162,8 @@ end
 
 Fundamental soliton period [m]: z₀ = (π/2)L_D = (π/2)T₀²/|β₂|.
 
-- `T0`: Pulse duration (1/e half-width) [s]
-- `beta2`: Second-order dispersion [s²/m]
+  - `T0`: Pulse duration (1/e half-width) [s]
+  - `beta2`: Second-order dispersion [s²/m]
 """
 function soliton_period(T0::Real, beta2::Real)
     π / 2 * dispersion_length(T0, beta2)
@@ -178,9 +178,9 @@ end
 
 Nonlinear coefficient [1/(W·m)] from material properties: γ = ω₀n₂/(cA_eff).
 
-- `lambda0`: Center wavelength [m]
-- `n2`: Nonlinear refractive index [m²/W]
-- `Aeff`: Effective mode area [m²]
+  - `lambda0`: Center wavelength [m]
+  - `n2`: Nonlinear refractive index [m²/W]
+  - `Aeff`: Effective mode area [m²]
 """
 function gamma_from_aeff(lambda0::Real, n2::Real, Aeff::Real)
     omega0 = 2π * SPEED_OF_LIGHT / lambda0
@@ -192,9 +192,9 @@ end
 
 Frequency-dependent nonlinear coefficient for M-GNLSE: γ(ω) = (ω₀+ω)n₂/(cA_eff(ω)).
 
-- `grid`: Grid object defining frequency array
-- `n2`: Nonlinear refractive index [m²/W]
-- `Aeff_omega`: Effective area at each grid frequency [m²]
+  - `grid`: Grid object defining frequency array
+  - `n2`: Nonlinear refractive index [m²/W]
+  - `Aeff_omega`: Effective area at each grid frequency [m²]
 """
 function gamma_from_aeff_vec(grid::Grid, n2::Real, Aeff_omega::AbstractVector)
     length(Aeff_omega) == grid.N || throw(
@@ -211,10 +211,10 @@ end
 
 Interpolate measured A_eff(λ) data to grid frequencies. Requires Interpolations.jl.
 
-- `grid`: Grid object defining target frequencies
-- `lambda_data`: Measured wavelengths [m]
-- `Aeff_data`: Measured effective areas [m²]
-- `extrapolation`: `:linear`, `:constant`, or `:error`
+  - `grid`: Grid object defining target frequencies
+  - `lambda_data`: Measured wavelengths [m]
+  - `Aeff_data`: Measured effective areas [m²]
+  - `extrapolation`: `:linear`, `:constant`, or `:error`
 """
 function aeff_from_measured_data(
     grid::Grid,

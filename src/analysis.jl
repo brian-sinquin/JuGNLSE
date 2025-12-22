@@ -1,5 +1,8 @@
 """
-Pulse analysis functions for JuGNLSE.
+Post-simulation analysis functions for optical pulse characterization.
+
+Provides energy, power, spectral bandwidth, and time-bandwidth product
+calculations for Results objects and pulse envelopes.
 """
 
 # ============================================================================
@@ -9,8 +12,11 @@ Pulse analysis functions for JuGNLSE.
 """
     _find_width_at_level(data::AbstractVector, grid::AbstractVector, level::Real)
 
-Find the width of a distribution at a specific level relative to its peak.
-Handles non-monotonic grids (like FFT-ordered omega) by sorting internally.
+Internal helper to compute distribution width at specified fractional level of peak.
+
+Sorts non-monotonic grids (FFT-ordered frequencies) before analysis. Employs
+linear interpolation at threshold crossings for sub-grid accuracy. Returns zero
+if distribution does not reach specified level.
 """
 function _find_width_at_level(data::AbstractVector, grid::AbstractVector, level::Real)
     # Handle non-monotonic grids (like FFT-ordered omega)
@@ -66,8 +72,11 @@ end
 """
     pulse_energy(At::AbstractVector, dt::Real)
 
-Calculate total pulse energy [J].
-E = ∫ |A(t)|² dt
+Compute total pulse energy [J] via temporal integration.
+
+Performs numerical integration E = ∫ |A(t)|² dt using trapezoidal rule
+with uniform time step `dt` [s]. Envelope normalization follows convention
+|A(t)|² = instantaneous power [W].
 """
 function pulse_energy(At::AbstractVector, dt::Real)
     return sum(abs2, At) * dt
@@ -76,8 +85,10 @@ end
 """
     peak_power(At::AbstractVector)
 
-Calculate peak power [W].
-P_peak = max(|A(t)|²)
+Extract peak instantaneous power [W] from temporal envelope.
+
+Returns maximum value of |A(t)|² across entire time window. Assumes
+envelope normalization where |A(t)|² represents instantaneous power.
 """
 function peak_power(At::AbstractVector)
     return maximum(abs2, At)
@@ -86,7 +97,10 @@ end
 """
     spectral_bandwidth(Aw::AbstractVector, omega::AbstractVector; level::Real=0.5)
 
-Calculate spectral bandwidth at a given level (default 0.5 for FWHM) [rad/s].
+Compute spectral bandwidth [rad/s] at specified fractional intensity level.
+
+Default `level=0.5` yields full-width at half-maximum (FWHM) of spectral
+intensity |Ã(ω)|². Handles FFT-ordered frequency arrays automatically.
 """
 function spectral_bandwidth(Aw::AbstractVector, omega::AbstractVector; level::Real=0.5)
     return _find_width_at_level(abs2.(Aw), omega, level)
@@ -95,8 +109,11 @@ end
 """
     time_bandwidth_product(At::AbstractVector, Aw::AbstractVector, t::AbstractVector, omega::AbstractVector)
 
-Calculate the Time-Bandwidth Product (TBP) using FWHM.
-TBP = (Δt_fwhm * Δω_fwhm) / (4π)
+Calculate dimensionless time-bandwidth product (TBP) from FWHM measurements.
+
+Computes TBP = (Δt_FWHM · Δω_FWHM) / (4π), providing pulse quality metric.
+Transform-limited pulses achieve minimum TBP for their shape (0.441 for
+sech², 0.315 for Gaussian). Returns NaN if widths undefined.
 """
 function time_bandwidth_product(
     At::AbstractVector, Aw::AbstractVector, t::AbstractVector, omega::AbstractVector
@@ -114,7 +131,10 @@ end
 """
     fwhm(data::AbstractVector, grid::AbstractVector)
 
-Calculate Full Width at Half Maximum (FWHM) of a distribution.
+Compute full-width at half-maximum (FWHM) of arbitrary distribution.
+
+Generic interface to width calculation at 50% peak level. Handles both
+temporal and spectral distributions with appropriate grid arrays.
 """
 function fwhm(data::AbstractVector, grid::AbstractVector)
     return _find_width_at_level(data, grid, 0.5)

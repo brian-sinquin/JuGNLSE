@@ -28,13 +28,16 @@ Implements A(z+dz) = exp(D̂·dz/2) exp(N̂·dz) exp(D̂·dz/2) A(z), where D̂ 
 dispersion and nonlinear operators.
 
 # Parameters
-- `dz`: Step size [m] (auto-computed as L/(20·n_saves) if `nothing`)
-- `adaptive`: Use adaptive stepping (experimental)
+
+  - `dz`: Step size [m] (auto-computed as L/(20·n_saves) if `nothing`)
+  - `adaptive`: Use adaptive stepping (experimental)
 
 # Returns
+
 Tuple of (`z`, `At`, `Aw`): propagation distances, time and frequency domain fields
 
 # Note
+
 Requires 2-5× more steps than ERK4IP for comparable accuracy, but simpler per step.
 """
 function propagate_ssfm(

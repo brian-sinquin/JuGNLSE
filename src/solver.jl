@@ -6,29 +6,33 @@ Solve the generalized nonlinear Schrödinger equation for pulse propagation in o
 Equation: ∂A/∂z = D̂[A] + N̂[A]
 
 # Parameters
-- `pulse`: Initial pulse condition
-- `params`: Simulation parameters (medium, effects, save points)
-- `method`: Solver choice - `:ERK4IP` (adaptive, default), `:RK4IP` (fixed), `:SSFM`
-- `rtol`, `atol`: Error tolerances for adaptive methods
-- `dz`: Step size (auto-selected if `nothing`)
-- `n_steps`: Number of steps for fixed-step methods
+
+  - `pulse`: Initial pulse condition
+  - `params`: Simulation parameters (medium, effects, save points)
+  - `method`: Solver choice - `:ERK4IP` (adaptive, default), `:RK4IP` (fixed), `:SSFM`
+  - `rtol`, `atol`: Error tolerances for adaptive methods
+  - `dz`: Step size (auto-selected if `nothing`)
+  - `n_steps`: Number of steps for fixed-step methods
 
 # Returns
+
 NamedTuple with `z`, `At`, `Aw`, `grid`, `params`, `method`
 
 # Example
+
 ```julia
 grid = create_grid(2^12, 10e-12, 835e-9)
 pulse = sech_pulse(grid, 50e-15, 10000.0)
 medium = Medium(0.15, 0.11, [-11.83e-27], 0.0, 835e-9)
-params = SimParams(medium=medium, n_saves=200)
+params = SimParams(; medium=medium, n_saves=200)
 results = solve(pulse, params)
 ```
 
 # Solver Comparison
-- **ERK4IP**: 4th order adaptive, recommended for general use
-- **RK4IP**: 4th order fixed-step, for benchmarking
-- **SSFM**: 2nd order, robust classical method
+
+  - **ERK4IP**: 4th order adaptive, recommended for general use
+  - **RK4IP**: 4th order fixed-step, for benchmarking
+  - **SSFM**: 2nd order, robust classical method
 
 See [`propagate_erk4ip`](@ref), [`propagate_rk4ip`](@ref), [`propagate_ssfm`](@ref)
 """
