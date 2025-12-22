@@ -1,49 +1,15 @@
 """
     create_grid(N::Int, time_window::Real, center_wavelength::Real)
 
-Create a time-frequency grid for GNLSE simulations.
+Create time-frequency grid for GNLSE simulations.
 
 # Arguments
-
-  - `N::Int`: Number of grid points (strongly recommend power of 2 for FFT efficiency)
-  - `time_window::Real`: Total time window [s]
-  - `center_wavelength::Real`: Center wavelength [m]
+- `N::Int`: Number of grid points (power of 2 recommended for FFT efficiency)
+- `time_window::Real`: Total time window [s]
+- `center_wavelength::Real`: Center wavelength [m]
 
 # Returns
-
-  - `Grid`: Grid structure containing time and frequency arrays
-
-# Grid Properties
-
-  - **Time domain**: Symmetric around t=0, spans `[-time_window/2, time_window/2)`
-  - **Frequency domain**: Angular frequency detuning Δω = ω - ω₀ in rad/s
-  - **FFT convention**: Pre-arranged with `fftshift` so `ifft(A(t)) → A(ω)` and `fft(A(ω)) → A(t)`
-  - **Resolution**: `dt = time_window/N`, `dω = 2π/time_window`
-
-# Examples
-
-```julia
-# Standard grid for femtosecond pulse simulation
-grid = create_grid(2^12, 10e-12, 835e-9)
-# 4096 points, 10 ps window, λ₀ = 835 nm
-# dt = 2.44 fs, dω = 0.628 rad/fs
-
-# High-resolution grid for broadband supercontinuum
-grid = create_grid(2^14, 20e-12, 1030e-9)
-# 16384 points, 20 ps window, λ₀ = 1030 nm
-# dt = 1.22 fs, dω = 0.314 rad/fs
-```
-
-# Notes
-
-  - Larger `N` provides better frequency resolution but increases memory and computation time
-  - `time_window` should be ~10× the pulse duration to avoid wrap-around effects
-  - Non-power-of-2 `N` will work but FFT performance may be significantly degraded
-
-# See Also
-
-  - [`create_grid_from_medium`](@ref): Automatically estimate time window from medium
-  - [`Grid`](@ref): Grid structure documentation
+- `Grid`: Grid structure with time domain symmetric around t=0 spanning [-time_window/2, time_window/2), frequency domain as angular frequency detuning Δω = ω - ω₀ [rad/s], and resolution dt = time_window/N, dω = 2π/time_window.
 """
 function create_grid(N::Int, time_window::Real, center_wavelength::Real)
     N > 0 || throw(ArgumentError("N must be positive"))
@@ -72,39 +38,15 @@ end
 """
     create_grid_from_medium(N::Int, medium::Medium; time_window::Real=nothing)
 
-Create a grid based on medium parameters with automatic time window estimation.
+Create grid using medium parameters with automatic time window estimation.
 
 # Arguments
-
-  - `N::Int`: Number of grid points (power of 2 recommended)
-  - `medium::Medium`: Medium parameters (uses lambda0 for center frequency)
-  - `time_window::Real`: (Optional) Time window [s]. If `nothing`, uses default 20 ps.
+- `N::Int`: Number of grid points (power of 2 recommended)
+- `medium::Medium`: Medium parameters (extracts lambda0 for center frequency)
+- `time_window::Real`: Time window [s], defaults to 20 ps if not specified
 
 # Returns
-
-  - `Grid`: Grid structure configured for the given medium
-
-# Examples
-
-```julia
-# Automatic time window (20 ps default)
-grid = create_grid_from_medium(2^12, medium)
-
-# Custom time window
-grid = create_grid_from_medium(2^12, medium; time_window=50e-12)  # 50 ps
-```
-
-# Notes
-
-  - Default 20 ps window is suitable for most femtosecond pulse simulations
-  - For picosecond pulses or long propagation, increase `time_window`
-  - For sub-10 fs pulses, consider reducing to 5-10 ps to save memory
-
-# See Also
-
-        # Estimate reasonable time window (heuristic)
-
-  - [`create_grid`](@ref): Direct grid creation with explicit parameters        # Use approximately 10 times the expected pulse duration
+- `Grid`: Grid structure configured for the specified medium
 """
 function create_grid_from_medium(
     N::Int, medium::Medium; time_window::Union{Real, Nothing}=nothing
