@@ -10,6 +10,68 @@ using ProgressMeter: Progress, update!
 # Import nonlinearity module functions
 import ..build_physics_model, ..PhysicsModel
 
+"""
+    propagate_erk4ip(pulse::Pulse, params::SimParams; progress=true, rtol=1e-6, atol=1e-8, dz=nothing)
+
+Adaptive embedded Runge-Kutta 4(3) solver in interaction picture for the GNLSE.
+
+This is the recommended solver for most simulations, providing adaptive step size control
+with embedded error estimation while maintaining high accuracy and efficiency.
+
+# Algorithm
+
+Uses a 4th-order Runge-Kutta method with 3rd-order embedded error estimator (ERK4IP)
+in the interaction picture. The interaction picture transformation removes the linear
+dispersion operator, making the nonlinear evolution easier to integrate accurately.
+
+# Parameters
+
+- `pulse::Pulse`: Initial pulse with time and frequency domain fields
+- `params::SimParams`: Simulation parameters including medium properties
+- `progress::Bool=true`: Show progress bar during propagation
+- `rtol::Float64=1e-6`: Relative error tolerance for adaptive stepping
+- `atol::Float64=1e-8`: Absolute error tolerance for adaptive stepping  
+- `dz::Union{Float64, Nothing}=nothing`: Initial step size [m], auto-selected if `nothing`
+
+# Returns
+
+- `z::Vector{Float64}`: Propagation distances [m]
+- `At::Matrix{ComplexF64}`: Time-domain field at each save point
+- `Aw::Matrix{ComplexF64}`: Frequency-domain field at each save point
+
+# Physics
+
+Solves the GNLSE in the interaction picture:
+
+```math
+\\frac{\\partial U}{\\partial z} = e^{-\\hat{D}z} \\hat{N}[e^{\\hat{D}z}U]
+```
+
+where ``\\hat{D}`` is the linear dispersion operator and ``\\hat{N}`` includes
+Kerr nonlinearity, Raman scattering, and self-steepening (shock) effects.
+
+# Examples
+
+```julia
+grid = create_grid(2^12, 10e-12, 835e-9)
+medium = Medium(1.0, 0.1, [-11.8e-27, 8.1e-41], 0.0, 835e-9)
+pulse = sech_pulse(grid, 50e-15, 10000.0, 835e-9)
+params = SimParams(medium=medium, n_saves=200, raman=true, shock=true)
+
+z, At, Aw = propagate_erk4ip(pulse, params, rtol=1e-6)
+```
+
+# See Also
+
+- [`propagate_rk4ip`](@ref): Fixed-step RK4IP for comparison
+- [`propagate_ssfm`](@ref): Classical split-step Fourier method
+- [`solve`](@ref): High-level interface that selects this solver by default
+
+# References
+
+Heidt, A. M. (2009). Efficient Adaptive Step Size Method for the Simulation of
+Supercontinuum Generation in Optical Fibers. *Journal of Lightwave Technology*, 27(18).
+"""
 function propagate_erk4ip(
     pulse::Pulse,
     params::SimParams;
