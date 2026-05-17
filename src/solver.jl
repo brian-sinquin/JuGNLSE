@@ -1,68 +1,80 @@
 """
-    solve(pulse::Pulse, params::SimParams; method=:ERK4IP, rtol=1e-6, at ol=1e-8, kwargs...)
+Main solver interface following gnlse-python conventions.
 
-Solve the generalized nonlinear Schrödinger equation for pulse propagation in optical fibers.
+Reference: gnlse-python GNLSE.run()
+"""
 
-Equation: ∂A/∂z = D̂[A] + N̂[A]
+"""
+    solve(pulse::Pulse, params::SimParams; progress::Bool=true)
 
-# Parameters
+Solve GNLSE following gnlse-python conventions using adaptive ERK4IP method.
 
-  - `pulse`: Initial pulse condition
-  - `params`: Simulation parameters (medium, effects, save points)
-  - `method`: Solver choice - `:ERK4IP` (adaptive, default), `:RK4IP` (fixed), `:SSFM`
-  - `rtol`, `atol`: Error tolerances for adaptive methods
-  - `dz`: Step size (auto-selected if `nothing`)
-  - `n_steps`: Number of steps for fixed-step methods
+# Arguments
+
+  - `pulse::Pulse`: Initial pulse condition
+  - `params::SimParams`: Simulation parameters
+  - `progress::Bool`: Show progress bar (default: true)
 
 # Returns
 
-NamedTuple with `z`, `At`, `Aw`, `grid`, `params`, `method`
+  - `Solution`: Solution structure with t, W, omega0, Z, At, AW
 
 # Example
 
 ```julia
-grid = create_grid(2^12, 10e-12, 835e-9)
-pulse = sech_pulse(grid, 50e-15, 10000.0)
-medium = Medium(0.15, 0.11, [-11.83e-27], 0.0, 835e-9)
-params = SimParams(; medium=medium, n_saves=200)
-results = solve(pulse, params)
+# Create grid (natural SI units: s, m, W)
+grid = create_grid(2^13, 12.5e-12, 835e-9)  # resolution, time_window [s], λ [m]
+
+# Create medium: Medium(L[m], γ[1/W/m], loss[dB/m], betas[sⁿ/m], λ[m])
+medium = Medium(0.15, 0.11, 0.0, [-11.83e-27], 835e-9)
+
+# Create pulse
+pulse = sech_pulse(grid, 10000.0, 50e-15)  # Pmax [W], FWHM [s]
+
+# Setup simulation parameters
+params = SimParams(;
+    medium=medium,
+    z_saves=200,
+    raman_model=BlowWood(),
+    self_steepening=false,
+    rtol=1e-6,
+    atol=1e-8,
+)
+
+# Solve
+solution = solve(pulse, params)
 ```
 
-# Solver Comparison
+# Notes
 
-  - **ERK4IP**: 4th order adaptive, recommended for general use
-  - **RK4IP**: 4th order fixed-step, for benchmarking
-  - **SSFM**: 2nd order, robust classical method
-
-See [`propagate_erk4ip`](@ref), [`propagate_rk4ip`](@ref), [`propagate_ssfm`](@ref)
+Integrates the GNLSE with the adaptive ERK4IP solver. All quantities are in
+natural SI units; the envelope spectrum follows the standard optics convention
+`AW = ifft(At)`.
 """
-function solve(
-    pulse::Pulse,
-    params::SimParams;
-    method::Symbol=:ERK4IP,
-    progress::Bool=true,
-    rtol::Float64=1e-6,
-    atol::Float64=1e-8,
-    dz::Union{Float64, Nothing}=nothing,
-    adaptive::Bool=false,
-    n_steps::Int=1000,
-)
-    # Dispatch to appropriate solver
-    if method == :ERK4IP
-        z, At, Aw = propagate_erk4ip(
-            pulse, params; progress=progress, rtol=rtol, atol=atol, dz=dz
-        )
-    elseif method == :RK4IP
-        z, At, Aw = propagate_rk4ip(
-            pulse, params; progress=progress, n_steps=n_steps, dz=dz
-        )
-    elseif method == :SSFM
-        z, At, Aw = propagate_ssfm(
-            pulse, params; progress=progress, adaptive=adaptive, dz=dz
-        )
-    else
-        error("Unknown solver method: $method. Use :ERK4IP, :RK4IP, or :SSFM")
+function solve(pulse::Pulse, params::SimParams; progress::Bool=true)
+    z, At, AW = propagate_erk4ip(
+        pulse, params; progress=progress, rtol=params.rtol, atol=params.atol
+    )
+
+    # Build solution
+    grid = pulse.grid
+    solution = Solution(
+        grid.t,          # Time grid [s]
+        grid.W,          # Absolute frequency [rad/s]
+        grid.omega0,     # Central frequency [rad/s]
+        z,               # Propagation distances [m]
+        At,              # Time domain fields (N × z_saves)
+        AW,              # Frequency domain fields (N × z_saves)
+    )
+
+    # Photon number is conserved by the GNLSE for a lossless fiber; a drift
+    # indicates the step-size tolerance is too loose.
+    if params.medium.loss == 0
+        n = photon_number(solution)
+        drift = abs(n[end] - n[1]) / n[1]
+        drift > 1e-2 && @warn "Photon number drifted by " *
+            "$(round(100 * drift; digits=2))% — consider a tighter `rtol`/`atol`."
     end
 
-    return (z=z, At=At, Aw=Aw, grid=pulse.grid, params=params, method=method)
+    return solution
 end

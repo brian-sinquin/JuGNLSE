@@ -1,478 +1,233 @@
-# ============================================================================
-# Nonlinear operators - FiberNlse approach with model struct
-# ============================================================================
+"""
+Nonlinear operators for GNLSE propagation.
+
+The package uses the standard optics FFT convention: the envelope spectrum is
+`AW = ifft(At)` and the field is `At = fft(AW)`. So `to_freq` is `ifft` and
+`to_time` is `fft`.
+"""
 
 using FFTW
 
 """
     PhysicsModel
 
-Precomputed physics operators and FFT plans for GNLSE propagation.
+Pre-computed operators and FFT plans for GNLSE propagation.
 
 # Fields
-
-  - `dispersion_term`: D̂(ω) = -α/2 + i∑(βₙ/n!)(iω)ⁿ
-  - `fftp`, `ifftp`: Forward and inverse FFT plans
-  - `γ`: Nonlinear coefficient [1/(W·m)] (scalar or frequency-dependent vector)
-  - `ω`: Angular frequency grid [rad/s]
-  - `ω0`: Central angular frequency [rad/s]
-  - `dt`: Time step [s]
-  - `fr`: Raman fraction
-  - `raman_freq_response`: h̃ᵣ(ω) in frequency domain
-  - `nonlinear_function`: Selected nonlinearity operator
+- `to_freq`: Plan for the time → frequency transform (`ifft`)
+- `to_time`: Plan for the frequency → time transform (`fft`)
+- `D`: Dispersion operator [1/m], FFT-natural order
+- `gamma`: Nonlinear coefficient γ/ω₀ [s/(W·m·rad)]
+- `W`: Nonlinear-term frequency factor [rad/s], FFT-natural order. Equals the
+   absolute angular frequency ω₀+V when self-steepening is on, or the constant
+   ω₀ when off — so the nonlinear term iγ·W reduces to iγ_phys in that case.
+- `dt`: Time step [s]
+- `N`: Number of grid points
+- `fr`: Raman fraction
+- `RW`: Raman response in frequency domain (if enabled)
+- `buf_t1`, `buf_t2`: Pre-allocated time-domain buffers
+- `buf_f1`: Pre-allocated frequency-domain buffer
 """
-struct PhysicsModel
-    dispersion_term::Vector{ComplexF64}
-    fftp::Any  # FFTW plan type
-    ifftp::Any  # FFTW plan type
-    γ::Union{Float64, Vector{ComplexF64}}
-    ω::Vector{Float64}
-    ω0::Float64
+struct PhysicsModel{TF, TT, NL}
+    to_freq::TF
+    to_time::TT
+    D::Vector{ComplexF64}
+    gamma::Float64
+    W::Vector{Float64}
     dt::Float64
+    N::Int
     fr::Float64
-    raman_freq_response::Union{Vector{ComplexF64}, Nothing}
-    nonlinear_function::Function
-end
-
-# ============================================================================
-# Nonlinear operators following FiberNlse pattern
-# Each takes (At, model) and returns frequency-domain nonlinearity
-# ============================================================================
-
-"""
-    kerr_only(At, model)
-
-Pure Kerr nonlinearity (SPM only).
-N̂[A] = iγ·FFT{A·|A|²}
-"""
-@inline function kerr_only(At::Vector{<:Complex}, model::PhysicsModel)
-    return (1.0im * model.γ) .* (model.fftp * (At .* abs2.(At)))
+    RW::Union{Nothing, Vector{ComplexF64}}
+    nonlinear_function::NL
+    # Pre-allocated buffers
+    buf_t1::Vector{ComplexF64}
+    buf_t2::Vector{ComplexF64}
+    buf_f1::Vector{ComplexF64}
 end
 
 """
-    kerr_shock(At, model)
+    _spm(u, model::PhysicsModel)
 
-Kerr + self-steepening (shock term).
-N̂[A] = iγ(1 - ω/ω₀)·FFT{A·|A|²}
+Kerr (self-phase modulation) nonlinear operator.
+
+Computes `iγ·W·to_freq(u|u|²)`. Self-steepening is carried by `model.W`: with
+self-steepening off, `W = ω₀` (constant) and iγ·W = iγ_phys; with it on,
+`W = ω₀+V`, giving the shock term iγ_phys(1+V/ω₀). Zero allocations.
+
+# See also
+
+[`_spm_raman`](@ref)
 """
-@inline function kerr_shock(At::Vector{<:Complex}, model::PhysicsModel)
-    return (1.0im * model.γ) .* (1 .- model.ω ./ model.ω0) .*
-           (model.fftp * (At .* abs2.(At)))
+function _spm(u, model::PhysicsModel)
+    # SPM term u·|u|²
+    @. model.buf_t1 = u * abs2(u)
+
+    # Transform to the frequency domain
+    mul!(model.buf_f1, model.to_freq, model.buf_t1)
+
+    # Multiply by iγW
+    @. model.buf_f1 = 1.0im * model.gamma * model.W * model.buf_f1
+
+    return model.buf_f1
 end
 
 """
-    kerr_raman(At, model)
+    _spm_raman(u, model::PhysicsModel)
 
-Kerr + Raman (no self-steepening).
-N̂[A] = iγ·FFT{A·[(1-fᵣ)|A|² + fᵣ(|A|² ⊗ hᵣ)]}
+SPM with Raman scattering nonlinear operator.
+
+Includes both instantaneous Kerr response and delayed Raman response via
+convolution with hᵣ(t). Raman causes intrapulse frequency shift (red-shifting
+spectral peak) and energy transfer to Stokes wavelengths. Zero allocations via
+pre-allocated buffers.
+
+# Physics
+
+Total response: n₂[|E|² + fᵣ∫hᵣ(t-t')|E(t')|²dt']E where fᵣ ≈ 0.18 is the
+Raman fraction. Convolution implemented efficiently via FFT multiplication.
+
+# Implementation:
+
+    conv = (|u|²) ⊛ hᵣ      via  to_time(to_freq(|u|²) .* RW)
+    op   = u .* ((1-fr)|u|² + fr·dt·conv)
+    result = iγ·W · to_freq(op)
+
+# See also
+
+[`raman_response`](@ref), [`_spm`](@ref)
 """
-@inline function kerr_raman(At::Vector{<:Complex}, model::PhysicsModel)
-    IT = abs2.(At)
-    # Raman convolution: fᵣ dt ∫ hᵣ(t')·|A(t-t')|² dt'
-    RS =
-        model.dt *
-        model.fr *
-        (model.ifftp * ((model.fftp * IT) .* model.raman_freq_response))
-    # Combined: (1-fᵣ)|A|² + fᵣ·RS
-    return (1.0im * model.γ) .* (model.fftp * (At .* ((1.0 - model.fr) .* IT .+ RS)))
+function _spm_raman(u, model::PhysicsModel)
+    # `_spm_raman` is only selected when Raman is enabled, so RW is a Vector.
+    # The assertion narrows the Union{Nothing,Vector} field type, keeping the
+    # broadcast below type-stable and allocation-free.
+    RW = model.RW::Vector{ComplexF64}
+
+    # Intensity |u|²
+    @. model.buf_t1 = abs2(u)
+
+    # Raman convolution: multiply the intensity spectrum by the Raman response
+    mul!(model.buf_f1, model.to_freq, model.buf_t1)
+    @. model.buf_f1 = model.buf_f1 * RW
+    mul!(model.buf_t2, model.to_time, model.buf_f1)   # buf_t2 = |u|² ⊛ hᵣ
+
+    # Total nonlinearity (instantaneous Kerr + delayed Raman) times u
+    @. model.buf_t1 = u * ((1.0 - model.fr) * abs2(u) + model.fr * model.dt * model.buf_t2)
+
+    # Transform to the frequency domain and multiply by iγW
+    mul!(model.buf_f1, model.to_freq, model.buf_t1)
+    @. model.buf_f1 = 1.0im * model.gamma * model.W * model.buf_f1
+
+    return model.buf_f1
 end
 
 """
-    kerr_raman_shock(At, model)
+    choose_nonlinear_term(raman::Bool)
 
-Full nonlinearity: Kerr + Raman + self-steepening.
-N̂[A] = iγ(1 - ω/ω₀)·FFT{A·[(1-fᵣ)|A|² + fᵣ(|A|² ⊗ hᵣ)]}
+Select the nonlinear operator. Self-steepening is not a separate operator —
+it is carried by `model.W` (see [`build_physics_model`](@ref)), so only the
+presence of Raman scattering selects between operators.
+
+# See also
+
+[`build_physics_model`](@ref), [`_spm`](@ref), [`_spm_raman`](@ref)
 """
-@inline function kerr_raman_shock(At::Vector{<:Complex}, model::PhysicsModel)
-    IT = abs2.(At)
-    RS =
-        model.dt *
-        model.fr *
-        (model.ifftp * ((model.fftp * IT) .* model.raman_freq_response))
-    return (1.0im * model.γ) .* (1 .- model.ω ./ model.ω0) .*
-           (model.fftp * (At .* ((1.0 - model.fr) .* IT .+ RS)))
-end
-
-# ============================================================================
-# Frequency-dependent nonlinear operators (M-GNLSE)
-# Following Lægsgaard (2007) pseudo-envelope method
-# ============================================================================
-
-"""
-    kerr_only_freq(At, model)
-
-Pure Kerr with frequency-dependent γ(ω).
-N̂[A] = F⁻¹[γ̃(ω)·F{A·|A|²}] where γ̃(ω) = iγ(ω)
-"""
-@inline function kerr_only_freq(At::Vector{<:Complex}, model::PhysicsModel)
-    # Transform nonlinear product to frequency domain
-    Aw_nonlin = model.fftp * (At .* abs2.(At))
-    # Apply frequency-dependent gamma (already includes i factor)
-    @. Aw_nonlin *= model.γ
-    return Aw_nonlin
-end
-
-"""
-    kerr_shock_freq(At, model)
-
-Kerr + self-steepening with frequency-dependent γ(ω).
-N̂[A] = F⁻¹[γ̃(ω)(1 - ω/ω₀)·F{A·|A|²}]
-"""
-@inline function kerr_shock_freq(At::Vector{<:Complex}, model::PhysicsModel)
-    Aw_nonlin = model.fftp * (At .* abs2.(At))
-    @. Aw_nonlin *= model.γ * (1 - model.ω / model.ω0)
-    return Aw_nonlin
-end
-
-"""
-    kerr_raman_freq(At, model)
-
-Kerr + Raman with frequency-dependent γ(ω).
-N̂[A] = F⁻¹[γ̃(ω)·F{A·[(1-fᵣ)|A|² + fᵣ(|A|² ⊗ hᵣ)]}]
-"""
-@inline function kerr_raman_freq(At::Vector{<:Complex}, model::PhysicsModel)
-    IT = abs2.(At)
-    RS =
-        model.dt *
-        model.fr *
-        (model.ifftp * ((model.fftp * IT) .* model.raman_freq_response))
-    Aw_nonlin = model.fftp * (At .* ((1.0 - model.fr) .* IT .+ RS))
-    @. Aw_nonlin *= model.γ
-    return Aw_nonlin
-end
-
-"""
-    kerr_raman_shock_freq(At, model)
-
-Full nonlinearity with frequency-dependent γ(ω): Kerr + Raman + shock.
-N̂[A] = F⁻¹[γ̃(ω)(1 - ω/ω₀)·F{A·[(1-fᵣ)|A|² + fᵣ(|A|² ⊗ hᵣ)]}]
-"""
-@inline function kerr_raman_shock_freq(At::Vector{<:Complex}, model::PhysicsModel)
-    IT = abs2.(At)
-    RS =
-        model.dt *
-        model.fr *
-        (model.ifftp * ((model.fftp * IT) .* model.raman_freq_response))
-    Aw_nonlin = model.fftp * (At .* ((1.0 - model.fr) .* IT .+ RS))
-    @. Aw_nonlin *= model.γ * (1 - model.ω / model.ω0)
-    return Aw_nonlin
-end
-
-"""
-    select_nonlinearity(shock::Bool, raman::Bool, freq_dependent::Bool)
-
-Select nonlinear operator at compile time for zero-overhead dispatch.
-
-# Arguments
-
-  - `shock`: Include self-steepening
-  - `raman`: Include Raman scattering
-  - `freq_dependent`: Use frequency-dependent γ(ω) (M-GNLSE)
-
-Returns function reference to appropriate nonlinear operator.
-"""
-function select_nonlinearity(shock::Bool, raman::Bool, freq_dependent::Bool)
-    if freq_dependent
-        # M-GNLSE operators with γ(ω)
-        return if shock && raman
-            kerr_raman_shock_freq
-        elseif shock
-            kerr_shock_freq
-        elseif raman
-            kerr_raman_freq
-        else
-            kerr_only_freq
-        end
-    else
-        # Standard GNLSE operators with scalar γ
-        return if shock && raman
-            kerr_raman_shock
-        elseif shock
-            kerr_shock
-        elseif raman
-            kerr_raman
-        else
-            kerr_only
-        end
-    end
-end
+choose_nonlinear_term(raman::Bool) = raman ? _spm_raman : _spm
 
 """
     build_physics_model(grid::Grid, params::SimParams)
 
-Construct `PhysicsModel` with precomputed operators and FFT plans.
-Automatically detects scalar γ (GNLSE) or frequency-dependent γ(ω) (M-GNLSE).
-FFT plans use FFTW.MEASURE for optimized execution.
+Construct PhysicsModel with pre-computed operators for GNLSE propagation.
 
-Returns `PhysicsModel` struct with all precomputed physics operators.
+Pre-computes all frequency-domain operators, FFT plans, and selects the
+appropriate nonlinear function. Called once at start of solve() to enable
+zero-allocation propagation in the ERK4IP stepper.
+
+# Arguments
+
+  - `grid`: Time-frequency grid
+  - `params`: Simulation parameters (medium, physics flags)
+
+# Returns
+
+PhysicsModel struct ready for propagation
+
+# Implementation Details
+
+  - FFT plans use FFTW with FFTW.MEASURE flag for optimization
+  - Dispersion operator computed via `dispersion_operator(grid, medium)`
+  - Raman response computed in time domain then FFT'd to frequency domain
+  - Self-steepening: folded into `W` (ω₀+Δω if enabled, else constant ω₀)
+  - Nonlinear function selected via `choose_nonlinear_term(raman)`
+
+# See also
+
+[`PhysicsModel`](@ref), [`propagate_erk4ip`](@ref), [`dispersion_operator`](@ref),
+[`raman_response`](@ref)
 """
 function build_physics_model(grid::Grid, params::SimParams)
-    # Create FFT plans with MEASURE flag for optimized transforms
-    # Takes longer to plan but 10-50% faster execution (critical for repeated use)
-    dummy = zeros(ComplexF64, grid.N)
-    fftp = plan_fft(dummy; flags=FFTW.MEASURE)
-    ifftp = plan_ifft(dummy; flags=FFTW.MEASURE)
+    medium = params.medium
+    N = grid.N
 
-    # Dispersion operator: D̂(ω) = -α/2 + i∑(βₙ/n!)(iω)ⁿ
-    D = dispersion_operator(grid, params.medium)
+    # Extract physics flags
+    enable_raman = params.raman_model !== nothing
+    enable_shock = params.self_steepening
 
-    # Raman response if needed
-    raman_freq_resp = nothing
-    if params.raman
-        h_R, _ = raman_response(grid, params.raman_model)
-        raman_freq_resp = raman_response_frequency(h_R, grid)
+    # Transform plans (FFTW.MEASURE for optimal performance). Standard optics
+    # convention: time → frequency is ifft, frequency → time is fft.
+    tmp = zeros(ComplexF64, N)
+    to_freq = plan_ifft(tmp; flags=FFTW.MEASURE)
+    to_time = plan_fft(tmp; flags=FFTW.MEASURE)
+
+    # Compute dispersion operator. grid.V is in monotonic order, so the
+    # operator must be fftshifted to FFT-natural order to align with AW.
+    D = fftshift(dispersion_operator(grid, medium))
+
+    # Gamma (nonlinear coefficient) - normalize by ω₀ as in gnlse-python
+    # gnlse-python: self.gamma = gamma / self.w_0
+    gamma = (medium.gamma isa Number ? medium.gamma : medium.gamma[1]) / grid.omega0
+
+    # Raman response in frequency domain (if enabled)
+    raman_freq_response = nothing
+    fr = 0.0
+    if enable_raman
+        # Compute the Raman response h_R(t) in the time domain
+        fr, h_R = raman_response(grid, params.raman_model)
+
+        # Frequency-domain Raman response. ifftshift puts the causal response
+        # (zero for t<0) into FFT-natural order with zero delay at index 1.
+        # RW = N·ifft(h_R) so that to_time(to_freq(I) .* RW) evaluates the
+        # circular convolution I ⊛ h_R for the ifft/fft transform pair.
+        raman_freq_response = N .* ifft(ifftshift(h_R))
     end
 
-    # Central frequency from grid (already computed)
-    ω0 = grid.omega0
+    # Frequency factor for the nonlinear term iγ·W·FFT(...).
+    # With self-steepening: W = ω₀+Δω (the true absolute frequency), giving the
+    # shock term iγ_phys(1+Δω/ω₀). Without it: W = ω₀ (constant), so iγ·W reduces
+    # to iγ_phys. grid.W is monotonic; ifftshift puts it in FFT-natural order.
+    W = enable_shock ? ifftshift(grid.W) : fill(grid.omega0, N)
 
-    # Handle scalar or frequency-dependent gamma
-    γ_raw = params.medium.gamma
-    freq_dependent = γ_raw isa AbstractVector
+    # Select nonlinear function (self-steepening is carried by W, not the operator)
+    nonlinear_function = choose_nonlinear_term(enable_raman)
 
-    γ = if freq_dependent
-        # M-GNLSE: γ(ω) stored as complex vector with i factor pre-applied
-        # Check grid size matches
-        length(γ_raw) == grid.N || error(
-            "Frequency-dependent gamma must have length $(grid.N), got $(length(γ_raw))",
-        )
+    # Pre-allocate working buffers for zero-allocation nonlinear operators
+    buf_t1 = zeros(ComplexF64, N)
+    buf_t2 = zeros(ComplexF64, N)
+    buf_f1 = zeros(ComplexF64, N)
 
-        # Pre-multiply by i for efficiency: γ̃(ω) = i·γ(ω)
-        Complex{Float64}.(1.0im .* γ_raw)
-    else
-        # Standard GNLSE: scalar gamma
-        Float64(γ_raw)
-    end
-
-    # Select nonlinear operator (compile-time dispatch, no runtime branching)
-    nonlin_fn = select_nonlinearity(params.shock, params.raman, freq_dependent)
-
-    return PhysicsModel(
-        D, fftp, ifftp, γ, grid.omega, ω0, grid.dt, params.fr, raman_freq_resp, nonlin_fn
+    # Construct model
+    PhysicsModel(
+        to_freq,
+        to_time,
+        D,
+        gamma,
+        W,
+        grid.dt,
+        N,
+        fr,
+        raman_freq_response,
+        nonlinear_function,
+        buf_t1,
+        buf_t2,
+        buf_f1,
     )
-end
-
-"""
-    nonlinear_operator(At::Vector{<:Complex}, grid::Grid, params::SimParams)
-
-Compute nonlinear operator N̂[A] = iγ[(1-fᵣ)|A|² + fᵣ(|A|² ⊗ hᵣ) + (1/ω₀)∂[...]/∂t].
-Legacy interface wrapping `PhysicsModel` approach for backward compatibility.
-
-# Arguments
-
-  - `At`: Time-domain field amplitude
-  - `grid`: Grid structure with FFT plans, dt, omega
-  - `params`: SimParams with raman/shock flags and medium parameters
-
-Returns nonlinear operator in frequency domain for split-step integration.
-"""
-function nonlinear_operator(At::Vector{<:Complex}, grid::Grid, params::SimParams)
-    # Build model on the fly for legacy compatibility
-    # In new solver, model is built once and reused
-    model = build_physics_model(grid, params)
-    return model.nonlinear_function(At, model)
-end
-
-# ============================================================================
-# Optimized frequency-dependent nonlinear operators
-# ============================================================================
-
-"""
-    nonlinear_freq_gamma_kerr(At, gamma_im_vec, fft_plan, ifft_plan)
-
-Pure Kerr nonlinearity with frequency-dependent γ(ω): N̂[A] = F⁻¹[γ̃(ω)·F{A·|A|²}].
-"""
-@inline function nonlinear_freq_gamma_kerr(
-    At::Vector{<:Complex}, gamma_im_vec::Vector{<:Complex}, fft_plan, ifft_plan
-)
-    It = abs2.(At)
-    nonlin_t = At .* It
-    nonlin_w = ifft_plan * nonlin_t
-    @. nonlin_w *= gamma_im_vec
-    return nonlin_w
-end
-
-"""
-    nonlinear_freq_gamma_kerr_raman(At, gamma_im_vec, fr, one_minus_fr, RW, fft_plan, ifft_plan, dt)
-
-Kerr + Raman with frequency-dependent γ(ω): N̂[A] = F⁻¹[γ̃(ω)·F{A·[(1-fᵣ)|A|² + fᵣ(|A|² ⊗ hᵣ)]}].
-"""
-@inline function nonlinear_freq_gamma_kerr_raman(
-    At::Vector{<:Complex},
-    gamma_im_vec::Vector{Complex{Float64}},
-    fr::Float64,
-    one_minus_fr::Float64,
-    RW::Vector{<:Complex},
-    fft_plan,
-    ifft_plan,
-    dt::Float64,
-)
-    It = abs2.(At)
-    It_w = ifft_plan * It
-    @. It_w *= RW * dt  # dt scaling for proper Raman convolution
-    R_term = fft_plan * It_w
-    @. R_term = one_minus_fr * It + fr * R_term
-
-    nonlin_t = At .* R_term
-    nonlin_w = ifft_plan * nonlin_t
-    @. nonlin_w *= gamma_im_vec
-    return nonlin_w
-end
-
-"""
-    nonlinear_freq_gamma_kerr_shock(At, gamma_im_vec, omega0_inv, omega, fft_plan, ifft_plan)
-
-Kerr + self-steepening with frequency-dependent γ(ω): N̂[A] = F⁻¹[γ̃(ω)(1-ω/ω₀)·F{A·|A|²}].
-"""
-@inline function nonlinear_freq_gamma_kerr_shock(
-    At::Vector{<:Complex},
-    gamma_im_vec::Vector{<:Complex},
-    omega0_inv::Float64,
-    omega::Vector{Float64},
-    fft_plan,
-    ifft_plan,
-)
-    It = abs2.(At)
-
-    # Shock term: A * (1/ω₀) * ∂|A|²/∂t
-    # With inverted FFT: ifft(time) → freq, fft(freq) → time
-    # Derivative: multiply by -iω (since ifft inverts the sign)
-    It_w = ifft_plan * It
-    @. It_w *= (-im * omega * omega0_inv)
-    dI_dt = fft_plan * It_w
-
-    # Total nonlinearity in time domain: A*|A|² + A*(1/ω₀)*∂|A|²/∂t
-    nonlin_t = @. At * (It + dI_dt)
-
-    # Apply γ(ω) in frequency domain
-    nonlin_w = ifft_plan * nonlin_t
-    @. nonlin_w *= gamma_im_vec
-    return nonlin_w
-end
-
-"""
-    nonlinear_freq_gamma_kerr_raman_shock(At, gamma_im_vec, omega0_inv, fr, one_minus_fr,
-                                          RW, omega, fft_plan, ifft_plan, dt)
-
-Full nonlinearity with frequency-dependent γ(ω): Kerr + Raman + self-steepening.
-N̂[A] = F⁻¹[γ̃(ω)(1-ω/ω₀)·F{A·[(1-fᵣ)|A|² + fᵣ(|A|² ⊗ hᵣ)]}].
-"""
-@inline function nonlinear_freq_gamma_kerr_raman_shock(
-    At::Vector{<:Complex},
-    gamma_im_vec::Vector{<:Complex},
-    omega0_inv::Float64,
-    fr::Float64,
-    one_minus_fr::Float64,
-    RW::Vector{<:Complex},
-    omega::Vector{Float64},
-    fft_plan,
-    ifft_plan,
-    dt::Float64,
-)
-    It = abs2.(At)
-
-    # Raman response
-    It_w = ifft_plan * It
-    @. It_w *= RW * dt  # dt scaling for proper Raman convolution
-    R_term = fft_plan * It_w
-    @. R_term = one_minus_fr * It + fr * R_term
-
-    # Shock term: A * (1/ω₀) * ∂R/∂t where R is Raman-modified intensity
-    # With inverted FFT: ifft(time) → freq, fft(freq) → time
-    # Derivative: multiply by -iω (since ifft inverts the sign)
-    R_w = ifft_plan * R_term
-    @. R_w *= (-im * omega * omega0_inv)
-    dR_dt = fft_plan * R_w
-
-    # Total nonlinearity in time domain: A*R + A*(1/ω₀)*∂R/∂t
-    nonlin_t = @. At * (R_term + dR_dt)
-
-    # Apply γ(ω) in frequency domain
-    nonlin_w = ifft_plan * nonlin_t
-    @. nonlin_w *= gamma_im_vec
-    return nonlin_w
-end
-
-"""
-    nonlinear_operator_frequency_dependent(At, gamma_im_vec, omega0_inv, fr, one_minus_fr,
-                                          omega, fft_plan, ifft_plan, RW, raman, shock, dt)
-
-Compute M-GNLSE nonlinear operator with frequency-dependent γ(ω).
-Uses Lægsgaard (2007) pseudo-envelope method: ∂C/∂z = [iβ(ω) - α/2]C + iγ(ω)F{|F⁻¹{C}|²F⁻¹{C}}.
-
-# Arguments
-
-  - `At`: Time-domain pseudo-envelope C(t)
-  - `gamma_im_vec`: iγ(ω) vector [1/(W·m)]
-  - `omega0_inv`: 1/ω₀ [s/rad] for shock term
-  - `fr`: Raman fraction
-  - `one_minus_fr`: 1 - fᵣ (precomputed)
-  - `omega`: Frequency grid [rad/s]
-  - `fft_plan`, `ifft_plan`: FFT plans
-  - `RW`: h̃ᵣ(ω) Raman response or `nothing`
-  - `raman`, `shock`: Effect flags
-  - `dt`: Time step [s]
-
-Returns nonlinear operator in frequency domain.
-Reference: Lægsgaard, Opt. Express 15, 16110 (2007).
-"""
-function nonlinear_operator_frequency_dependent(
-    At::Vector{<:Complex},
-    gamma_im_vec::Vector{<:Complex},
-    omega0_inv::Float64,
-    fr::Float64,
-    one_minus_fr::Float64,
-    omega::Vector{Float64},
-    fft_plan,
-    ifft_plan,
-    RW::Union{Vector{<:Complex}, Nothing},
-    raman::Bool,
-    shock::Bool,
-    dt::Float64,
-)
-    # Dispatch to specialized function (all parameters pre-computed)
-    if raman && RW !== nothing
-        if shock
-            return nonlinear_freq_gamma_kerr_raman_shock(
-                At,
-                gamma_im_vec,
-                omega0_inv,
-                fr,
-                one_minus_fr,
-                RW,
-                omega,
-                fft_plan,
-                ifft_plan,
-                dt,
-            )
-        else
-            return nonlinear_freq_gamma_kerr_raman(
-                At, gamma_im_vec, fr, one_minus_fr, RW, fft_plan, ifft_plan, dt
-            )
-        end
-    else
-        if shock
-            return nonlinear_freq_gamma_kerr_shock(
-                At, gamma_im_vec, omega0_inv, omega, fft_plan, ifft_plan
-            )
-        else
-            return nonlinear_freq_gamma_kerr(At, gamma_im_vec, fft_plan, ifft_plan)
-        end
-    end
-end
-
-"""
-    apply_nonlinearity!(At::Vector{<:Complex}, nonlin::Vector{<:Complex}, dz::Real)
-
-Apply nonlinear operator in-place via exponential step: Aₜ ← Aₜ·exp(N̂·dz).
-
-# Arguments
-
-  - `At`: Time-domain field (modified in-place)
-  - `nonlin`: Nonlinear operator
-  - `dz`: Propagation step [m]
-"""
-function apply_nonlinearity!(At::Vector{<:Complex}, nonlin::Vector{<:Complex}, dz::Real)
-    @. At *= exp(nonlin * dz)
-    nothing
 end

@@ -1,160 +1,191 @@
 """
+Raman response functions following gnlse-python conventions.
+
+Reference: gnlse-python raman_response.py
+Units: Time in [s] (natural SI units)
+"""
+
+"""
+    raman_response(T::Vector{Float64}, model::BlowWood)
+
+Compute Raman response following gnlse-python raman_blowwood.
+
+# Arguments
+- `T::Vector{Float64}`: Time vector [ps]
+- `model::BlowWood`: Raman model with parameters
+
+# Returns
+- `(fr, RT)`: Raman fraction and response function
+
+# Physics
+Following gnlse-python raman_blowwood:
+```python
+tau1 = 0.0122  # ps
+tau2 = 0.032   # ps
+ha = (tau1**2 + tau2**2) / tau1 / (tau2**2) * exp(-T/tau2) * sin(T/tau1)
+RT = ha
+RT[T < 0] = 0
+fr = 0.18
+```
+
+Reference: K. J. Blow & D. Wood, IEEE J. Quantum Electron. 25, 2665 (1989)
+"""
+function raman_response(T::Vector{Float64}, model::BlowWood)
+    tau1 = model.tau1  # s
+    tau2 = model.tau2  # s
+
+    # gnlse-python: ha = (tau1**2 + tau2**2) / tau1 / (tau2**2) * exp(-T/tau2) * sin(T/tau1)
+    RT = (tau1^2 + tau2^2) / tau1 / (tau2^2) .* exp.(-T ./ tau2) .* sin.(T ./ tau1)
+
+    # Apply causality
+    # gnlse-python: RT[T < 0] = 0
+    RT[T .< 0] .= 0
+
+    return model.fr, RT
+end
+
+"""
+    raman_response(T::Vector{Float64}, model::LinAgrawal)
+
+Compute Raman response following gnlse-python raman_linagrawal.
+
+# Arguments
+- `T::Vector{Float64}`: Time vector [ps]
+- `model::LinAgrawal`: Raman model with parameters
+
+# Returns
+- `(fr, RT)`: Raman fraction and response function
+
+# Physics
+Following gnlse-python raman_linagrawal:
+```python
+tau1 = 0.0122  # ps
+tau2 = 0.032   # ps
+taub = 0.096   # ps
+fb = 0.21
+fc = 0.04
+fa = 1 - fb - fc
+# Anisotropic response
+ha = (tau1**2 + tau2**2) / tau1 / (tau2**2) * exp(-T/tau2) * sin(T/tau1)
+# Isotropic response
+hb = (2*taub - T) / (taub**2) * exp(-T/taub)
+# Total response
+RT = (fa + fc) * ha + fb * hb
+RT[T < 0] = 0
+fr = 0.245
+```
+
+Reference: Q. Lin & G. P. Agrawal, Opt. Lett. 31, 3086 (2006)
+"""
+function raman_response(T::Vector{Float64}, model::LinAgrawal)
+    tau1 = model.tau1  # s
+    tau2 = model.tau2  # s
+    taub = model.taub  # s
+    fb = model.fb
+    fc = model.fc
+    fa = 1 - fb - fc
+
+    # gnlse-python: ha = (tau1**2 + tau2**2) / tau1 / (tau2**2) * exp(-T/tau2) * sin(T/tau1)
+    ha = (tau1^2 + tau2^2) / tau1 / (tau2^2) .* exp.(-T ./ tau2) .* sin.(T ./ tau1)
+
+    # gnlse-python: hb = (2*taub - T) / (taub**2) * exp(-T/taub)
+    hb = (2 .* taub .- T) ./ (taub^2) .* exp.(-T ./ taub)
+
+    # gnlse-python: RT = (fa + fc) * ha + fb * hb
+    RT = (fa + fc) .* ha .+ fb .* hb
+
+    # Apply causality
+    # gnlse-python: RT[T < 0] = 0
+    RT[T .< 0] .= 0
+
+    return model.fr, RT
+end
+
+"""
+    raman_response(T::Vector{Float64}, model::Hollenbeck)
+
+Compute Raman response following D. Hollenbeck & C. D. Cantrell's 13-oscillator fit.
+
+# Arguments
+  - `T::Vector{Float64}`: Time vector [s]
+  - `model::Hollenbeck`: Raman model with Raman fraction fr
+
+# Returns
+  - `(fr, RT)`: Raman fraction `fr` and impulse response `RT(t)` [1/s]
+
+# Physics
+
+The Hollenbeck model combines 13 Lorentzian resonances with Gaussian spectral
+broadening to fit experimental Raman gain/loss data from silica fiber:
+
+    h(ω) = Σ Aᵢ [Lorentzian(ω - ωᵢ, Γᵢ) ⊗ Gaussian(ΔGᵢ)]
+
+Each resonance is parametrized by:
+  - **CP**: center position [cm⁻¹]
+  - **A**: peak amplitude (relative units)
+  - **Gauss**: Gaussian FWHM [cm⁻¹]
+  - **Lorentz**: Lorentzian FWHM [cm⁻¹]
+
+The model is converted to the time domain and normalized by the Raman fraction
+`fr` (set to 0.20 by default), which represents the fractional power transfer
+into the Raman-shifted component.
+
+Reference: D. Hollenbeck & C. D. Cantrell, J. Opt. Soc. Am. B 19, 2886 (2002)
+"""
+function raman_response(T::Vector{Float64}, model::Hollenbeck)
+    # Component positions [1/cm]
+    CP = [56.25, 100.0, 231.25, 362.5, 463.0, 497.0, 611.5, 691.67, 793.67,
+          835.5, 930.0, 1080.0, 1215.0]
+
+    # Peak intensity (amplitude)
+    A = [1.0, 11.40, 36.67, 67.67, 74.0, 4.5, 6.8, 4.6, 4.2, 4.5, 2.7, 3.1, 3.0]
+
+    # Gaussian FWHM [1/cm]
+    Gauss = [52.10, 110.42, 175.00, 162.50, 135.33, 24.5, 41.5, 155.00, 59.5, 64.3,
+             150.0, 91.0, 160.0]
+
+    # Lorentzian FWHM [1/cm]
+    Lorentz = [17.37, 38.81, 58.33, 54.17, 45.11, 8.17, 13.83, 51.67, 19.83, 21.43,
+               50.00, 30.33, 53.33]
+
+    # Convert wavenumbers [1/cm] to angular frequencies/rates [rad/s].
+    # ω = 2π·c·(CP·100), with c in m/s; L and γ use π·c (FWHM convention).
+    w = 2π .* c .* 100.0 .* CP
+    L = π .* c .* 100.0 .* Gauss
+    gamma = π .* c .* 100.0 .* Lorentz
+
+    # Initialize RT
+    RT = zeros(Float64, length(T))
+
+    # gnlse-python: RT += A[i] * exp(-gamma[i]*T) * exp((-L[i]**2*T**2)/4) * sin(w[i]*T)
+    for i in 1:length(A)
+        @. RT += A[i] * exp(-gamma[i] * T) * exp((-L[i]^2 * T^2) / 4) * sin(w[i] * T)
+    end
+
+    # Apply causality
+    # gnlse-python: RT[T < 0] = 0
+    RT[T .< 0] .= 0
+
+    # Normalize
+    # gnlse-python: dt = T[1] - T[0]; RT = RT / (sum(RT) * dt)
+    dt = T[2] - T[1]
+    RT = RT ./ (sum(RT) * dt)
+
+    return model.fr, RT
+end
+
+"""
     raman_response(grid::Grid, model::RamanModel)
 
-Compute normalized Raman response function hᵣ(t) in time domain for GNLSE Raman term
-∂A/∂z|_Raman = iγfᵣA ∫_{-∞}^{t} hᵣ(t-t')|A(t')|² dt'. All models satisfy causality
-(hᵣ(t) = 0 for t < 0) and normalization (∫₀^∞ hᵣ(t) dt = 1). Available models:
-BlowWood (τ₁=12.2 fs, τ₂=32 fs, fᵣ=0.18), LinAgrawal (three-component with Boson peak,
-fᵣ=0.245), Hollenbeck (13-oscillator fit to experimental data, fᵣ≈0.20).
+Convenience wrapper that extracts time vector from grid.
 
 # Arguments
-
-  - `grid::Grid`: Time-frequency grid
-  - `model::RamanModel`: Raman model specification
-
-# Returns
-
-  - `(h_R, fr)`: Normalized response function [unitless] and Raman fraction fᵣ [unitless]
-"""
-function raman_response(grid::Grid, model::BlowWood)
-    τ1 = 12.2e-15  # s
-    τ2 = 32.0e-15  # s
-
-    # Create response function (only for t ≥ 0)
-    h_R = zeros(Float64, grid.N)
-
-    for (i, t) in enumerate(grid.t)
-        if t >= 0
-            h_R[i] = (τ1^2 + τ2^2) / (τ1 * τ2^2) * exp(-t / τ2) * sin(t / τ1)
-        end
-    end
-
-    (h_R, model.fr)
-end
-
-"""
-    raman_response(grid::Grid, model::LinAgrawal)
-
-Compute three-component Raman response with Boson peak contribution for improved
-low-frequency accuracy. Combines primary Lorentzian (τ₁=12.2 fs, τ₂=32 fs) with
-Boson peak (τb=96 fs) using weighting factor fb=0.21. Preferred for broadband
-simulations and sub-100 fs pulses. Reference: Q. Lin and G. P. Agrawal,
-Opt. Lett. 31, 3086-3088 (2006).
-"""
-function raman_response(grid::Grid, model::LinAgrawal)
-    # Primary oscillator parameters (same as Blow-Wood)
-    τ1 = 12.2e-15  # s
-    τ2 = 32.0e-15  # s
-
-    # Boson peak parameters
-    τb = 96.0e-15  # s - slower relaxation
-    fb = model.fb  # Boson peak fraction (default 0.21)
-
-    # Create response function
-    h_R = zeros(Float64, grid.N)
-
-    for (i, t) in enumerate(grid.t)
-        if t >= 0
-            # Single-Lorentzian component (Blow-Wood form)
-            h_single = (τ1^2 + τ2^2) / (τ1 * τ2^2) * exp(-t / τ2) * sin(t / τ1)
-
-            # Boson peak component (damped exponential)
-            h_boson = (2τb - t) / τb^2 * exp(-t / τb)
-
-            # Combined response with weighting
-            h_R[i] = (1 - fb) * h_single + fb * h_boson
-        end
-    end
-
-    (h_R, model.fr)
-end
-
-"""
-    raman_response(grid::Grid, model::Hollenbeck)
-
-Compute 13-oscillator Raman response fitted to experimental Raman gain data.
-Response is h_R(t) = Σᵢ Aᵢ·exp(-Γᵢt)·sin(Ωᵢt) with damped harmonic oscillators
-spanning 1.75-15.6 THz. Provides highest accuracy for supercontinuum generation
-and precise spectral predictions. Parameters from Table 1 of Hollenbeck & Cantrell,
-JOSA B 19, 2886-2902 (2002).
-"""
-function raman_response(grid::Grid, model::Hollenbeck)
-    # Hollenbeck-Cantrell parameters (13 oscillators)
-    # From Table 1 of JOSA B 19, 2886 (2002)
-    # Units: frequencies in THz (× 2π for rad/s), damping in THz
-
-    # Oscillator parameters [frequency (THz), damping (THz), amplitude (normalized)]
-    oscillators = [
-        (15.6, 0.50, 0.010),  # Mode 1
-        (13.35, 0.70, 0.048),  # Mode 2
-        (12.15, 0.55, 0.092),  # Mode 3  - dominant peak
-        (11.40, 0.40, 0.057),  # Mode 4
-        (10.35, 0.35, 0.038),  # Mode 5
-        (9.15, 0.32, 0.025),  # Mode 6
-        (8.70, 0.28, 0.018),  # Mode 7
-        (7.80, 0.25, 0.012),  # Mode 8
-        (6.52, 0.23, 0.008),  # Mode 9
-        (5.82, 0.20, 0.005),  # Mode 10
-        (4.50, 0.18, 0.003),  # Mode 11
-        (3.25, 0.15, 0.002),  # Mode 12 - low frequency tail
-        (1.75, 0.10, 0.001),  # Mode 13 - Boson peak region
-    ]
-
-    h_R = zeros(Float64, grid.N)
-
-    for (i, t) in enumerate(grid.t)
-        if t >= 0
-            # Sum contributions from all oscillators
-            for (ν, Γ, A) in oscillators
-                # Convert to SI units
-                Ω = 2π * ν * 1e12    # THz → rad/s
-                γ = 2π * Γ * 1e12    # THz → 1/s damping rate
-
-                # Damped oscillator response
-                h_R[i] += A * exp(-γ * t) * sin(Ω * t)
-            end
-        end
-    end
-
-    # Normalize (ensure ∫h_R dt = 1)
-    dt = grid.dt
-    integral = sum(h_R) * dt
-    if integral > 0
-        h_R ./= integral
-    end
-
-    (h_R, model.fr)
-end
-
-"""
-    raman_response_frequency(h_R::Vector{Float64}, grid::Grid)
-
-Transform Raman response to frequency domain for efficient convolution via FFT.
-Converts time-domain convolution (|A|² ⊗ hᵣ)(t) to frequency-domain multiplication
-F{|A|²} × F{hᵣ}, reducing complexity from O(N²) to O(N log N). Implementation uses
-conj(fft(ifftshift(h_R))) where ifftshift aligns zero-time for FFT and conjugate
-matches established solver conventions.
-
-# Arguments
-
-  - `h_R::Vector{Float64}`: Time-domain Raman response [unitless]
-  - `grid::Grid`: Time-frequency grid
+- `grid::Grid`: Grid with time vector T
+- `model::RamanModel`: Raman model
 
 # Returns
-
-  - `Vector{ComplexF64}`: Frequency-domain response R̃(ω) [unitless]
+- `(fr, RT)`: Raman fraction and response function
 """
-function raman_response_frequency(h_R::Vector{Float64}, grid::Grid)
-    # FFT of Raman response for convolution theorem: F{f ⊗ h} = F{f} × F{h}
-    #
-    # CRITICAL: Match FiberNlse convention exactly:
-    # 1. ifftshift(h_R): Move zero time to the beginning
-    # 2. fft: Transform to frequency domain
-    # 3. conj: Apply conjugate (this is the FiberNlse convention)
-    # 4. NO dt multiplication here - it's applied during convolution
-    #
-    # This matches: conj(fft(ifftshift(h_R)))
-    #
-    RW = conj(fft(ifftshift(h_R)))
-    RW
+function raman_response(grid::Grid, model::RamanModel)
+    return raman_response(grid.t, model)
 end

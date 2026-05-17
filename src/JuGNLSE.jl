@@ -1,70 +1,78 @@
 """
     JuGNLSE
 
-Numerical solver for the Generalized Nonlinear Schrödinger Equation (GNLSE) describing
-optical pulse propagation in nonlinear dispersive media.
+Numerical solver for the Generalized Nonlinear Schrödinger Equation (GNLSE) following
+gnlse-python conventions for optical pulse propagation in nonlinear dispersive media.
 
 # Physical Effects
 
-  - Dispersion: Arbitrary-order Taylor expansion β₂, β₃, β₄, ...
-  - Kerr nonlinearity: Self-phase modulation, γ|A|²
+  - Dispersion: Arbitrary-order Taylor expansion β₂, β₃, β₄, ... [ps^n/m]
+  - Kerr nonlinearity: Self-phase modulation, γ|A|² [1/(W·m)]
   - Raman scattering: Delayed nonlinear response (BlowWood, LinAgrawal, Hollenbeck models)
-  - Self-steepening: Shock term ∂(|A|²)/∂t for sub-100 fs pulses
-  - Fiber loss: Constant α or frequency-dependent α(ω)
-  - M-GNLSE: Frequency-dependent γ(ω) via pseudo-envelope method
+  - Self-steepening: Shock term for sub-100 fs pulses
+  - Fiber loss: α(ω) [dB/m]
 
 # Solvers
 
-  - `solve()`: Adaptive ERK4IP (embedded RK4(5) in interaction picture)
-  - `propagate_ssfm()`: Symmetric split-step Fourier method (2nd order)
-  - `propagate_rk4ip()`: Fixed-step RK4 in interaction picture
+  - `solve()`: Adaptive ERK4IP (embedded RK4 in interaction picture) following gnlse-python
+
+# Units
+
+Natural SI units throughout:
+  - Time: s (seconds)
+  - Wavelength: m (meters)
+  - Frequency: rad/s
+  - Power: W (watts)
+  - Distance: m (meters)
+  - Dispersion: s^n/m
+  - Nonlinearity: 1/(W·m)
+  - Loss: dB/m
 
 # Usage
 
 ```julia
 using JuGNLSE
 
-# Define grid and medium
-grid = create_grid(2^12, 10e-12, 835e-9)
-medium = Medium(0.15, 0.11, [-11.83e-27], 0.0, 835e-9)
+# Define grid (natural SI units)
+grid = create_grid(2^13, 12.5e-12, 835e-9)  # resolution, time_window [s], λ [m]
 
-# Create pulse and solve
-pulse = sech_pulse(grid, 28.4e-15, 1e3)
-params = SimParams(; medium=medium)
-results = solve(pulse, params)
+# Define medium: Medium(L[m], γ[1/W/m], loss[dB/m], betas[sⁿ/m], λ[m])
+medium = Medium(0.15, 0.11, 0.0, [-11.83e-27], 835e-9)
+
+# Create pulse
+pulse = sech_pulse(grid, 10000.0, 50e-15)  # Pmax [W], FWHM [s]
+
+# Setup parameters
+params = SimParams(medium=medium, z_saves=200, raman_model=BlowWood())
+
+# Solve
+solution = solve(pulse, params)
 ```
 
 # Main Exports
 
-**Types**: `Medium`, `Grid`, `Pulse`, `SimParams`, `RamanModel`, `BlowWood`, `LinAgrawal`, `Hollenbeck`
+**Types**: `Medium`, `Grid`, `Pulse`, `SimParams`, `Solution`, `RamanModel`, `BlowWood`, `LinAgrawal`, `Hollenbeck`
 
-**Pulses**: `sech_pulse`, `gaussian_pulse`, `cw_pulse`, `custom_pulse`
+**Pulses**: `sech_pulse`, `gaussian_pulse`, `lorentzian_pulse`, `cw_pulse`
 
-**Grids**: `create_grid`, `create_grid_from_medium`
+**Grids**: `create_grid`
 
-**Solvers**: `solve`, `propagate_erk4ip`, `propagate_rk4ip`, `propagate_ssfm`
+**Solvers**: `solve`
 
-**Analysis**: `pulse_energy`, `peak_power`, `spectral_bandwidth`, `time_bandwidth_product`, `fwhm`
-
-**Physics**: `calculate_soliton_power`, `soliton_order`, `dispersion_length`, `nonlinear_length`
-
-**Operators**: `dispersion_operator`, `apply_dispersion!`, `raman_response`, `nonlinear_operator`
+**Physics**: `dispersion_operator`, `raman_response`, `build_physics_model`
 
 # References
 
+Adapted from gnlse-python (https://github.com/WUST-FOG/gnlse-python)
 G. P. Agrawal, "Nonlinear Fiber Optics" (Academic Press, 2019)
-J. Hult, J. Lightwave Technol. 25, 3770 (2007)
-J. Lægsgaard, Opt. Express 15, 16110 (2007)
 """
 module JuGNLSE
 
 using FFTW
 using LinearAlgebra
-using Unitful
-using PhysicalConstants.CODATA2018: SpeedOfLightInVacuum
 
-# Physical constants (extract numerical value in m/s)
-const SPEED_OF_LIGHT = ustrip(u"m/s", SpeedOfLightInVacuum)  # 299792458.0 m/s
+# Physical constants - natural SI units
+const c = 299792458.0  # Speed of light [m/s]
 
 # Include submodules
 include("types.jl")
@@ -76,42 +84,41 @@ include("nonlinearity.jl")
 
 # Solvers
 include("solvers/erk4ip.jl")
-include("solvers/rk4ip.jl")
-include("solvers/ssfm.jl")
 
 include("solver.jl")
-
-include("physics.jl")
 include("analysis.jl")
 
 # Export types
-export Medium, SimParams, Grid, Pulse
+export Medium, SimParams, Grid, Pulse, Solution
 export RamanModel, BlowWood, LinAgrawal, Hollenbeck
+export DispersionModel, TaylorDispersion, TabulatedDispersion
 export PhysicsModel  # Internal physics model struct
 
 # Export grid functions
-export create_grid, create_grid_from_medium
+export create_grid, wavelength_grid
 
 # Export pulse functions
-export sech_pulse, gaussian_pulse, cw_pulse, custom_pulse
+export sech_pulse, gaussian_pulse, lorentzian_pulse, cw_pulse
 
 # Export dispersion functions
-export dispersion_operator, apply_dispersion, apply_dispersion!
+export dispersion_operator, propagation_constant
 
 # Export Raman functions
-export raman_response, raman_response_frequency
+export raman_response
 
-# Export solver functions
+# Export solver interface
 export solve
-export propagate_erk4ip, propagate_rk4ip, propagate_ssfm
 
-# Export utility functions
-export calculate_soliton_power, soliton_order, pulse_energy, peak_power
-export dispersion_length, nonlinear_length, soliton_period
-export spectral_bandwidth, time_bandwidth_product, fwhm
-export db_to_linear, linear_to_db
-export wavelength_to_frequency, frequency_to_wavelength
-export gamma_from_aeff, gamma_from_aeff_vec, aeff_from_measured_data
-export convert_loss
+# Export physics model builder
+export build_physics_model
 
-end
+# Export analysis functions
+export pulse_energy, peak_power, fwhm, spectral_bandwidth, time_bandwidth_product
+export photon_number, spectral_centroid
+export dispersion_length, nonlinear_length, soliton_number
+export add_noise, rin_rms, spectral_coherence
+
+# Physical constant
+export c
+
+end # module

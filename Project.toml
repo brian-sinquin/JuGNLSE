@@ -6,16 +6,12 @@ authors = ["Brian Sinquin <148503669+brian-sinquin@users.noreply.github.com> and
 [deps]
 FFTW = "7a1cc6ca-52ef-59f5-83cd-3a7055c09341"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
-PhysicalConstants = "5ad8b20f-a522-5ce9-bfc9-ddf1d5bda6ab"
 ProgressMeter = "92933f4c-e287-5a05-a399-4b506db050ca"
-Revise = "295af30f-e4ad-537b-8983-00126c2a3abe"
-Unitful = "1986cc42-f94f-5a68-af5c-568840ba703d"
+Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
 
 [compat]
 FFTW = "1.8"
-PhysicalConstants = "0.2.4"
 ProgressMeter = "1.11.0"
-Revise = "3.12.3"
 julia = "1.10"
 
 [extras]

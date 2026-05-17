@@ -1,140 +1,184 @@
 """
-    sech_pulse(grid::Grid, width::Real, power_peak::Real, center_wavelength::Real;
-               T0::Bool=false, time_offset::Real=0.0, phase::Real=0.0, chirp::Real=0.0)
+Pulse envelope generation in natural SI units.
 
-Generate hyperbolic secant pulse A(t) = √P₀ sech(t/T₀) exp(-iC(t/T₀)²/2).
+Units: Time in [s], Power in [W], Wavelength in [m]
+"""
+
+using FFTW
+using Random
+
+"""
+    sech_pulse(grid::Grid, Pmax::Real, FWHM::Real)
+
+Generate hyperbolic secant pulse in natural SI units.
 
 # Arguments
 
   - `grid::Grid`: Time-frequency grid
-  - `width::Real`: Pulse width [s] - FWHM if T0=false, 1/e half-width if T0=true
-  - `power_peak::Real`: Peak power [W]
-  - `center_wavelength::Real`: Center wavelength [m]
-  - `T0::Bool`: Width interpretation flag (false=FWHM, true=1/e width)
-  - `time_offset::Real`: Time offset from center [s]
-  - `phase::Real`: Initial phase [rad]
-  - `chirp::Real`: Linear chirp parameter C (0=transform-limited)
+  - `Pmax::Real`: Peak power [W]
+  - `FWHM::Real`: Pulse duration Full-Width Half-Maximum [s]
+
+# Returns
+
+  - `Pulse`: Pulse structure with At and AW
+
+# Physics
+
+Following gnlse-python SechEnvelope:
+
+```python
+m = 2 * log(1 + sqrt(2))
+A(T) = sqrt(Pmax) * 2 / (exp(m*T/FWHM) + exp(-m*T/FWHM))
+     = sqrt(Pmax) * sech(m*T/FWHM)
+```
+
+Where m = 2*arcsinh(1) ≈ 1.763 is the factor relating FWHM to 1/e half-width.
 """
-function sech_pulse(
-    grid::Grid,
-    duration::Real,
-    power_peak::Real;
-    T0::Bool=false,
-    time_offset::Real=0.0,
-    phase::Real=0.0,
-    chirp::Real=0.0,
-)
-    duration > 0 || throw(ArgumentError("Duration must be positive"))
-    power_peak >= 0 || throw(ArgumentError("Peak power must be non-negative"))
+function sech_pulse(grid::Grid, Pmax::Real, FWHM::Real)
+    Pmax >= 0 || throw(ArgumentError("Peak power must be non-negative"))
+    FWHM > 0 || throw(ArgumentError("FWHM must be positive"))
 
-    # Convert to 1/e half-width T0
-    T0_param = T0 ? duration : duration / SECH_FWHM_TO_T0
+    # gnlse-python: m = 2 * np.log(1 + np.sqrt(2))
+    m = 2 * log(1 + sqrt(2))
 
-    # Time array shifted by offset
-    t_shifted = grid.t .- time_offset
-
-    # Create sech envelope with fused broadcast for zero allocations
-    # A(t) = √P₀ sech(t/T₀) exp(iφ) exp(-iC(t/T₀)²/2)
+    # gnlse-python: A(T) = sqrt(Pmax) * 2 / (exp(m*T/FWHM) + exp(-m*T/FWHM))
     At = similar(grid.t, ComplexF64)
-    @. At =
-        sqrt(power_peak) *
-        sech(t_shifted / T0_param) *
-        exp(im * phase) *
-        exp(-im * chirp * (t_shifted / T0_param)^2 / 2)
+    @. At = sqrt(Pmax) * 2 / (exp(m * grid.t / FWHM) + exp(-m * grid.t / FWHM))
 
-    # Transform to frequency domain (using ifftshift to center pulse in FFT window)
-    Aw = fft(ifftshift(At))
+    # Envelope spectrum (standard optics convention: AW = ifft(At))
+    AW = ifft(At)
 
-    Pulse(At, Aw, grid)
+    return Pulse(At, AW, grid)
 end
 
 """
-    gaussian_pulse(grid::Grid, duration::Real, power_peak::Real;
-                   T0::Bool=false, time_offset::Real=0.0, phase::Real=0.0, chirp::Real=0.0)
+    gaussian_pulse(grid::Grid, Pmax::Real, FWHM::Real)
 
-Generate Gaussian pulse A(t) = √P₀ exp(-(t/T₀)²/2) exp(-iC(t/T₀)²/2).
+Generate Gaussian pulse following gnlse-python GaussianEnvelope.
 
 # Arguments
 
   - `grid::Grid`: Time-frequency grid
-  - `duration::Real`: Pulse duration [s] - FWHM if T0=false, 1/e half-width if T0=true
-  - `power_peak::Real`: Peak power [W]
-  - `T0::Bool`: Width interpretation flag (false=FWHM, true=1/e width)
-  - `time_offset::Real`: Time offset from center [s]
-  - `phase::Real`: Initial phase [rad]
-  - `chirp::Real`: Linear chirp parameter C
+  - `Pmax::Real`: Peak power [W]
+  - `FWHM::Real`: Pulse duration Full-Width Half-Maximum [s]
+
+# Returns
+
+  - `Pulse`: Pulse structure with At and AW
+
+# Physics
+
+Following gnlse-python GaussianEnvelope, where `m = 4*log(2)` relates the 1/e²
+half-width to the FWHM:
+
+```python
+A(T) = sqrt(Pmax) * exp(-m * 0.5 * T² / FWHM²)
+```
+
+This defines a pulse whose intensity drops to half-maximum at ±FWHM/2.
 """
-function gaussian_pulse(
-    grid::Grid,
-    duration::Real,
-    power_peak::Real;
-    T0::Bool=false,
-    time_offset::Real=0.0,
-    phase::Real=0.0,
-    chirp::Real=0.0,
-)
-    duration > 0 || throw(ArgumentError("Duration must be positive"))
-    power_peak >= 0 || throw(ArgumentError("Peak power must be non-negative"))
+function gaussian_pulse(grid::Grid, Pmax::Real, FWHM::Real)
+    Pmax >= 0 || throw(ArgumentError("Peak power must be non-negative"))
+    FWHM > 0 || throw(ArgumentError("FWHM must be positive"))
 
-    # Convert duration to 1/e half-width T0
-    T0_param = T0 ? duration : duration / GAUSSIAN_FWHM_TO_T0
+    # gnlse-python: m = 4 * np.log(2)
+    m = 4 * log(2)
 
-    # Time array shifted by offset
-    t_shifted = grid.t .- time_offset
-
-    # Create Gaussian envelope with fused broadcast
-    # A(t) = √P₀ exp(-(t/T₀)²/2) exp(iφ) exp(-iC(t/T₀)²/2)
+    # gnlse-python: A(T) = sqrt(Pmax) * exp(-m * .5 * T**2 / FWHM**2)
     At = similar(grid.t, ComplexF64)
-    @. At =
-        sqrt(power_peak) *
-        exp(-(t_shifted / T0_param)^2 / 2) *
-        exp(im * phase) *
-        exp(-im * chirp * (t_shifted / T0_param)^2 / 2)
+    @. At = sqrt(Pmax) * exp(-m * 0.5 * grid.t^2 / FWHM^2)
 
-    # Transform to frequency domain (using ifftshift to center pulse in FFT window)
-    Aw = fft(ifftshift(At))
+    # Envelope spectrum (standard optics convention: AW = ifft(At))
+    AW = ifft(At)
 
-    Pulse(At, Aw, grid)
+    return Pulse(At, AW, grid)
 end
 
 """
-    cw_pulse(grid::Grid, power::Real; phase::Real=0.0)
+    lorentzian_pulse(grid::Grid, Pmax::Real, FWHM::Real)
 
-Generate continuous wave pulse with constant amplitude A(t) = √P exp(iφ).
+Generate Lorentzian pulse following gnlse-python LorentzianEnvelope.
 
 # Arguments
 
   - `grid::Grid`: Time-frequency grid
-  - `power::Real`: CW power [W]
-  - `phase::Real`: Initial phase [rad]
+  - `Pmax::Real`: Peak power [W]
+  - `FWHM::Real`: Pulse duration Full-Width Half-Maximum [s]
+
+# Returns
+
+  - `Pulse`: Pulse structure with At and AW
+
+# Physics
+
+Following gnlse-python LorentzianEnvelope:
+
+```python
+m = 2 * sqrt(sqrt(2) - 1)
+A(T) = sqrt(Pmax) / (1 + (m*T/FWHM)^2)
+```
 """
-function cw_pulse(grid::Grid, power::Real; phase::Real=0.0)
-    power >= 0 || throw(ArgumentError("Power must be non-negative"))
+function lorentzian_pulse(grid::Grid, Pmax::Real, FWHM::Real)
+    Pmax >= 0 || throw(ArgumentError("Peak power must be non-negative"))
+    FWHM > 0 || throw(ArgumentError("FWHM must be positive"))
 
-    # Constant amplitude
-    At = fill(sqrt(power) * exp(im * phase), grid.N)
+    # gnlse-python: m = 2 * sqrt(sqrt(2) - 1)
+    m = 2 * sqrt(sqrt(2) - 1)
 
-    # Transform to frequency domain
-    Aw = fft(At)
+    # gnlse-python: A(T) = sqrt(Pmax) / (1 + (m*T/FWHM)**2)
+    At = similar(grid.t, ComplexF64)
+    @. At = sqrt(Pmax) / (1 + (m * grid.t / FWHM)^2)
 
-    Pulse(At, Aw, grid)
+    # Envelope spectrum (standard optics convention: AW = ifft(At))
+    AW = ifft(At)
+
+    return Pulse(At, AW, grid)
 end
 
 """
-    custom_pulse(grid::Grid, At::Vector{<:Complex})
+    cw_pulse(grid::Grid, Pmax::Real; Pn::Real=0.0, rng=Random.default_rng())
 
-Create pulse from user-defined time-domain envelope. Computes frequency representation via FFT.
+Generate a continuous-wave (CW) field with optional broadband temporal noise.
 
 # Arguments
 
   - `grid::Grid`: Time-frequency grid
-  - `At::Vector{<:Complex}`: Time-domain envelope [√W] (length must match grid.N)
+  - `Pmax::Real`: CW power [W]
+  - `Pn::Real`: Power of the additive temporal noise floor [W] (default: 0.0)
+  - `rng`: random source for the noise realization
+
+# Returns
+
+  - `Pulse`: Pulse structure with At and AW
+
+# Physics
+
+A constant-amplitude field `√Pmax` with, if `Pn > 0`, an additive seed of
+amplitude `√Pn` and an *independent* uniformly random phase in every time bin:
+
+    A(t) = √Pmax + √Pn · exp(i·2π·U(t)),   U(t) ~ Uniform[0, 1)
+
+For a physically grounded quantum (one-photon-per-mode) or RIN seed on top of a
+clean field, use [`add_noise`](@ref) instead.
 """
-function custom_pulse(grid::Grid, At::Vector{<:Complex})
-    length(At) == grid.N || throw(ArgumentError("At length must match grid size"))
+function cw_pulse(
+    grid::Grid, Pmax::Real; Pn::Real=0.0, rng::Random.AbstractRNG=Random.default_rng()
+)
+    Pmax >= 0 || throw(ArgumentError("Peak power must be non-negative"))
+    Pn >= 0 || throw(ArgumentError("Noise power must be non-negative"))
 
-    # Transform to frequency domain
-    Aw = fft(At)
+    N = grid.N
 
-    Pulse(copy(At), Aw, grid)
+    # Constant-amplitude CW field in the time domain
+    At = fill(ComplexF64(sqrt(Pmax)), N)
+
+    # Add noise if requested — a fresh, independent random phase per time bin
+    if Pn > 0
+        At .+= sqrt(Pn) .* cis.(2π .* rand(rng, N))
+    end
+
+    # Envelope spectrum (standard optics convention: AW = ifft(At))
+    AW = ifft(At)
+
+    return Pulse(At, AW, grid)
 end

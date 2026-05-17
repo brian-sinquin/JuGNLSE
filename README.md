@@ -17,22 +17,35 @@ Pkg.add("JuGNLSE")
 
 ## Basic Usage
 
+All quantities are in natural SI units (seconds, metres, watts).
+
 ```julia
 using JuGNLSE
 
-# Define the physical medium
-medium = Medium(0.15, 0.11, [-11.83e-27, 8.13e-41], 0.0, 835e-9)
+# Define the fiber medium (keyword constructor — avoids argument-order mistakes)
+medium = Medium(;
+    fiber_length = 0.15,                  # m
+    gamma        = 0.11,                  # 1/(W·m)
+    loss         = 0.0,                   # dB/m
+    betas        = [-11.83e-27, 8.13e-41],# Taylor dispersion: β₂ [s²/m], β₃ [s³/m], …
+    lambda0      = 835e-9,                # m
+)
 
-# Set up the computational grid
-grid = create_grid(2^12, 10e-12, 835e-9)
+# Set up the time–frequency grid: resolution, time window [s], center wavelength [m]
+grid = create_grid(2^13, 12.5e-12, 835e-9)
 
-# Generate an initial pulse
-pulse = sech_pulse(grid, 50e-15, 10000.0)
+# Generate an initial pulse: peak power [W], FWHM [s]
+pulse = sech_pulse(grid, 10000.0, 50e-15)
 
-# Configure and solve
-params = SimParams(medium=medium, raman=true, shock=true)
-results = solve(pulse, params)
+# Configure the simulation and solve
+params = SimParams(; medium=medium, raman_model=BlowWood(), self_steepening=true)
+solution = solve(pulse, params)
+
+# `solution.At` / `solution.AW` are (N × z_saves); each column is one distance.
 ```
+
+Measured dispersion can be supplied instead of a Taylor expansion via
+`TabulatedDispersion(detuning, beta)` (passed as `dispersion=` to `Medium`).
 
 ## Documentation
 

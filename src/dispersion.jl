@@ -1,85 +1,92 @@
 """
-    dispersion_operator(grid::Grid, medium::Medium)
-
-Construct the linear dispersion operator L̂(ω) = iβ(ω) - α(ω)/2 for GNLSE propagation.
-
-Computes the frequency-domain operator for the linear part of the GNLSE using Taylor expansion
-β(ω) = Σₙ₌₂^∞ (βₙ/n!)(ω-ω₀)ⁿ about the carrier frequency ω₀. The β₀ and β₁ terms are omitted
-as they represent global phase and group delay. Array indexing: `betas[1]` = β₂, `betas[2]` = β₃.
-Loss α must be in Nepers/m. Returns `Vector{ComplexF64}` of length `grid.N` in units [m⁻¹].
-
-Positive β₂ indicates normal dispersion; negative β₂ indicates anomalous dispersion enabling
-soliton propagation. Higher-order terms (β₃, β₄) introduce spectral asymmetry and pulse distortion.
+Dispersion operator for GNLSE simulations in natural SI units.
 """
-function dispersion_operator(grid::Grid, medium::Medium)
-    # grid.omega is the frequency detuning Δω = ω - ω₀
-    Δω = grid.omega
 
-    # Initialize dispersion
-    beta_omega = zeros(Float64, grid.N)
+"""
+    propagation_constant(V, model::DispersionModel)
 
-    # Taylor expansion of dispersion
-    # Note: betas are in SI units (s^n/m), omega is in rad/s
-    # betas[1] = beta2, betas[2] = beta3, etc. (beta0 and beta1 are omitted)
-    for (idx, beta_n) in enumerate(medium.betas)
-        n = idx + 1  # betas[1] is beta2, so n = 2, 3, 4, ...
-        # Higher order terms: βₙ/n! * Δωⁿ
-        # Standard convention: β(ω) = Σ (βₙ/n!) Δω^n where βₙ = d^nβ/dω^n
-        beta_omega .+= beta_n .* (Δω .^ n) ./ factorial(n)
+Propagation-constant deviation `B(V)` [1/m] for the dispersion `model`, sampled
+on the relative angular-frequency grid `V = ω - ω₀` [rad/s]. This is an
+intermediate quantity (intermediate in the frequency domain) used internally to
+construct the dispersion operator [`dispersion_operator`](@ref).
+
+# Method Implementations
+
+For **TaylorDispersion**, computes the power-series expansion:
+
+    B(V) = Σ βₙ/n! · Vⁿ,  n ≥ 2
+
+This representation is fast and suits analytical studies, but assumes dispersion
+is smooth and well-approximated by the first few terms.
+
+For **TabulatedDispersion**, linearly interpolates the measured/numerically-computed
+dispersion curve onto the simulation grid, then uses constant extrapolation beyond
+the tabulated frequency range. This is more accurate for complex materials (PCF,
+highly dispersive windows) but requires tabulated data.
+"""
+function propagation_constant(V::AbstractVector{Float64}, model::TaylorDispersion)
+    # Taylor series: B = Σ βₙ/n! · Vⁿ, n ≥ 2
+    B = zeros(Float64, length(V))
+    for (i, beta) in enumerate(model.betas)
+        n = i + 1  # betas[1]=β₂ → n=2, betas[2]=β₃ → n=3, etc.
+        B .+= beta ./ factorial(n) .* (V .^ n)
     end
+    return B
+end
 
-    # Add loss term (negative imaginary part)
-    # alpha is in natural units: Nepers/m (use convert_loss() to convert from dB)
-    # Standard GNLSE: ∂Ã/∂z = +iβ(ω)Ã - (α/2)Ã + nonlinear terms
-    linop = im .* beta_omega .- medium.alpha ./ 2
-
-    ComplexF64.(linop)
+function propagation_constant(V::AbstractVector{Float64}, model::TabulatedDispersion)
+    # Linear interpolation onto V, flat extrapolation outside the tabulated range
+    xs, ys = model.detuning, model.beta
+    B = similar(V)
+    @inbounds for k in eachindex(V, B)
+        x = V[k]
+        if x <= xs[1]
+            B[k] = ys[1]
+        elseif x >= xs[end]
+            B[k] = ys[end]
+        else
+            j = searchsortedlast(xs, x)         # xs[j] ≤ x < xs[j+1]
+            t = (x - xs[j]) / (xs[j + 1] - xs[j])
+            B[k] = ys[j] + t * (ys[j + 1] - ys[j])
+        end
+    end
+    return B
 end
 
 """
-    apply_dispersion!(Aw::Vector{<:Complex}, linop::Vector{<:Complex}, dz::Real)
+    dispersion_operator(V::AbstractVector{Float64}, medium::Medium)
 
-Apply linear dispersion operator to frequency-domain field in-place via Ã_out(ω) = Ã_in(ω) × exp(L̂(ω) × dz).
+Construct the linear dispersion operator `D(V) = i·B(V) - α/2` [1/m], where:
 
-Modifies `Aw` directly using zero-allocation broadcasting. Typically called hundreds to thousands of
-times per simulation in split-step propagation schemes. Returns `nothing`. O(N) complexity where N is grid size.
-
-  - `Aw`: Frequency-domain field [√W·s], modified in-place
-  - `linop`: Linear operator L̂(ω) = iβ(ω) - α(ω)/2 [m⁻¹]
-  - `dz`: Propagation step [m]
-"""
-function apply_dispersion!(Aw::Vector{<:Complex}, linop::Vector{<:Complex}, dz::Real)
-    @. Aw *= exp(linop * dz)
-    nothing
-end
-
-"""
-    apply_dispersion(Aw::Vector{<:Complex}, linop::Vector{<:Complex}, dz::Real)
-
-Apply dispersion operator to frequency-domain field (allocating version).
+  - `B(V)`: propagation-constant deviation from the dispersion model [1/m]
+  - `α`: fiber loss in Neper/m, converted from dB/m via α = ln(10^(loss/10))
+  - The factor i·B appears in the interaction-picture GNLSE; α/2 implements
+    exponential decay
 
 # Arguments
 
-  - `Aw::Vector{<:Complex}`: Frequency-domain field Ã(ω) [√W·s]
-  - `linop::Vector{<:Complex}`: Linear dispersion operator L̂(ω) [m⁻¹]
-  - `dz::Real`: Propagation step [m]
+  - `V::Vector{Float64}`: relative angular frequency [rad/s]
+  - `medium::Medium`: fiber with dispersion model and loss
 
 # Returns
 
-  - `Vector{ComplexF64}`: Propagated frequency-domain field Ã_out(ω)
+  - `D::Vector{ComplexF64}`: dispersion operator, one value per frequency bin
 
-# Performance Note
+# Notes
 
-This version allocates a new array. For performance-critical loops, use [`apply_dispersion!`](@ref) instead.
-
-# Example
-
-```julia
-linop = dispersion_operator(grid, medium)
-Aw = ifft(pulse.At)
-Aw_propagated = apply_dispersion(Aw, linop, 0.001)
-```
+The loss term `-α/2` in the frequency domain translates to multiplicative decay
+`exp(-αz)` in the time domain (amplitude), which becomes `exp(-2αz)` in intensity.
+See [`medium.loss`](@ref Medium) for units.
 """
-function apply_dispersion(Aw::Vector{<:Complex}, linop::Vector{<:Complex}, dz::Real)
-    @. Aw * exp(linop * dz)
+function dispersion_operator(V::AbstractVector{Float64}, medium::Medium)
+    alpha = log(10.0^(medium.loss / 10.0))
+    B = propagation_constant(V, medium.dispersion)
+    return @. 1im * B - alpha / 2
 end
+
+"""
+    dispersion_operator(grid::Grid, medium::Medium)
+
+Convenience wrapper that extracts `V` from `grid`.
+"""
+dispersion_operator(grid::Grid, medium::Medium) = dispersion_operator(grid.V, medium)
