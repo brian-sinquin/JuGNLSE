@@ -94,11 +94,7 @@ include("nonlinearity.jl")
 include("propagation_steps.jl") # New: Propagation pipeline steps
 
 # Solvers
-# Explicitly export the submodules to avoid scope issues
-export Solvers
 include("solvers/interface.jl")
-include("solvers/erk4ip.jl")
-include("solvers/rk4.jl")
 
 include("solver.jl")
 include("analysis.jl")
