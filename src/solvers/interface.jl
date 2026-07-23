@@ -3,6 +3,8 @@ module Solvers
 using FFTW
 using LinearAlgebra
 using ProgressMeter
+import LinearAlgebra: mul!
+import FFTW: fftshift!
 using ..JuGNLSE: GNLSEProblem, Solution, Pulse, SimParams, photon_number
 
 # Re-import types needed for solver interface

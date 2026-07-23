@@ -1,7 +1,4 @@
-using FFTW
-using FFTW: fftshift!
-using LinearAlgebra: mul!
-using ProgressMeter: Progress, update!
+
 
 import ..build_physics_model, ..PhysicsModel
 using ..JuGNLSE: GNLSEProblem, Solution, Pulse, SimParams, AbstractGammaCoefficient, photon_number

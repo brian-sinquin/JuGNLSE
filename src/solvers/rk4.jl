@@ -1,7 +1,4 @@
-using FFTW
-using FFTW: fftshift!
-using LinearAlgebra: mul!
-using ProgressMeter: Progress, update!
+
 
 struct RK4 <: AbstractGNLSESolver
     dz::Float64

@@ -6,17 +6,12 @@ The package uses the standard optics FFT convention: the envelope spectrum is
 `to_time` is `fft`.
 """
 
-using FFTW
+
 
 # Conversion constant
 const C = 299792458.0 # Speed of light in vacuum [m/s]
 
-"""
-    _omega_to_lambda(omega::Real)
 
-Converts angular frequency `omega` [rad/s] to wavelength `lambda` [m].
-"""
-_omega_to_lambda(omega::Real) = 2π * C / omega
 
 """
     PhysicsModel
