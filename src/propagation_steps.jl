@@ -237,7 +237,9 @@ function propagate!(pulse::Pulse, steps::Vector{<:AbstractPropagationStep}; kwar
     full_solution_At = Matrix{ComplexF64}(undef, length(pulse.At), 0)
     full_solution_AW = Matrix{ComplexF64}(undef, length(pulse.AW), 0)
 
-    current_pulse = deepcopy(pulse)
+    # We create a scratch pulse to avoid modifying the input pulse unless necessary,
+    # but we avoid deepcopy to keep memory allocations low.
+    current_pulse = Pulse(copy(pulse.At), copy(pulse.AW), pulse.grid)
 
     for (i, step) in enumerate(steps)
         if step isa Fiber
