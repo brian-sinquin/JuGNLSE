@@ -4,10 +4,14 @@ using FFTW
 using LinearAlgebra
 using Random
 
-# All core types and physics definitions
-include("core.jl")
-
-# Solver interface
+# Load core modules in order
+include("types.jl")
+include("grid.jl")
+include("pulses.jl")
+include("dispersion.jl")
+include("raman.jl")
+include("gamma.jl")
+include("nonlinearity.jl")
 include("solvers/interface.jl")
 include("solver.jl")
 include("analysis.jl")
