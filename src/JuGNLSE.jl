@@ -81,6 +81,7 @@ include("pulses.jl")
 include("dispersion.jl")
 include("raman.jl")
 include("gamma.jl")
+include("nonlinearity.jl")
 
 """
     solve(problem, solver; progress)
@@ -90,8 +91,6 @@ function solve end
 
 # Solvers
 include("solvers/interface.jl")
-include("solvers/erk4ip.jl")
-include("solvers/rk4.jl")
 include("solver.jl") # Solve implementation
 include("analysis.jl")
 

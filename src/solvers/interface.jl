@@ -1,20 +1,13 @@
-module Solvers
+# Solver interface and implementations
+# This file defines the solver interface and solvers, now directly in the JuGNLSE module.
 
-using FFTW
-using LinearAlgebra
-using ProgressMeter
-using ..JuGNLSE: GNLSEProblem, Solution, Pulse, SimParams, photon_number
-
-# Re-import types needed for solver interface
-import ..JuGNLSE: AbstractGNLSESolver
-
-export AbstractGNLSESolver, ERK4IP, RK4
+# --- Interface ---
+abstract type AbstractGNLSESolver end
 
 function solve(problem::GNLSEProblem, solver::AbstractGNLSESolver; progress::Bool=true)
     error("solve not implemented for $(typeof(solver))")
 end
 
+# --- Implementations ---
 include("erk4ip.jl")
 include("rk4.jl")
-
-end # module Solvers
