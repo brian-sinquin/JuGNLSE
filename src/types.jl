@@ -139,6 +139,37 @@ function Medium(;
 end
 
 """
+    Grid{T<:Real}
+
+Time and frequency grid for GNLSE propagation.
+
+# Fields
+
+  - `N::Int`: Number of grid points (resolution)
+  - `t::Vector{T}`: Time grid [s], centered at zero
+  - `V::Vector{T}`: Relative angular frequency ω - ω₀ [rad/s], monotonic
+  - `W::Vector{T}`: Absolute optical angular frequency ω = ω₀ + V [rad/s], monotonic
+  - `dt::T`: Time step [s]
+  - `omega0::T`: Central angular frequency ω₀ [rad/s]
+  - `lambda0::T`: Center wavelength [m]
+
+# Notes
+
+  - V = ω - ω₀ is the physical detuning; W = ω₀ + V is the absolute frequency
+  - ω₀ = 2πc/λ₀ (all frequencies in rad/s)
+  - V and W are stored in monotonic order, not FFT-natural order
+"""
+struct Grid{T <: Real}
+    N::Int
+    t::Vector{T}
+    V::Vector{T}          # Relative angular frequency ω - ω₀ [rad/s], monotonic
+    W::Vector{T}          # Absolute angular frequency ω₀ + V [rad/s], monotonic
+    dt::T
+    omega0::T             # Central angular frequency [rad/s]
+    lambda0::T            # Center wavelength [m]
+end
+
+"""
     RamanModel
 
 Abstract base type for Raman response models.
@@ -276,36 +307,7 @@ struct Hollenbeck <: RamanModel
     Hollenbeck(; fr::Float64=0.20) = new(fr)
 end
 
-"""
-    Grid{T<:Real}
 
-Time and frequency grid for GNLSE propagation.
-
-# Fields
-
-  - `N::Int`: Number of grid points (resolution)
-  - `t::Vector{T}`: Time grid [s], centered at zero
-  - `V::Vector{T}`: Relative angular frequency grid ω - ω₀ [rad/s], monotonic
-  - `W::Vector{T}`: Absolute optical angular frequency ω = ω₀ + V [rad/s], monotonic
-  - `dt::T`: Time step [s]
-  - `omega0::T`: Central angular frequency ω₀ [rad/s]
-  - `lambda0::T`: Center wavelength [m]
-
-# Notes
-
-  - V = ω - ω₀ is the physical detuning; W = ω₀ + V is the absolute frequency
-  - ω₀ = 2πc/λ₀ (all frequencies in rad/s)
-  - V and W are stored in monotonic order, not FFT-natural order
-"""
-struct Grid{T <: Real}
-    N::Int
-    t::Vector{T}
-    V::Vector{T}          # Relative angular frequency ω - ω₀ [rad/s], monotonic
-    W::Vector{T}          # Absolute angular frequency ω₀ + V [rad/s], monotonic
-    dt::T
-    omega0::T             # Central angular frequency [rad/s]
-    lambda0::T            # Center wavelength [m]
-end
 
 """
     Pulse{T<:Complex}
