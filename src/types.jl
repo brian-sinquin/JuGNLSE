@@ -153,6 +153,57 @@ Abstract type for GNLSE solvers.
 abstract type AbstractGNLSESolver end
 
 """
+    AbstractGammaCoefficient
+
+Abstract base type for nonlinear coefficient models.
+"""
+abstract type AbstractGammaCoefficient end
+
+"""
+    ConstantGamma(gamma)
+
+Nonlinear coefficient `gamma` [1/(W·m)] assumed to be constant.
+"""
+struct ConstantGamma <: AbstractGammaCoefficient
+    gamma::Float64
+end
+
+ConstantGamma(gamma::Real) = ConstantGamma(Float64(gamma))
+
+"""
+    ZDependentGamma(gamma_func::Function)
+
+Nonlinear coefficient `gamma` [1/(W·m)] that varies with propagation distance `z` [m].
+`gamma_func` is a function `f(z)` that returns the gamma value at a given `z`.
+"""
+struct ZDependentGamma <: AbstractGammaCoefficient
+    gamma_func::Function
+end
+
+"""
+    WavelengthDependentGamma(gamma_func::Function)
+
+Nonlinear coefficient `gamma` [1/(W·m)] that varies with wavelength `lambda` [m].
+`gamma_func` is a function `f(lambda)` that returns the gamma value at a given `lambda`.
+"""
+struct WavelengthDependentGamma <: AbstractGammaCoefficient
+    gamma_func::Function
+end
+
+"""
+    GNLSEProblem{T<:Complex}
+
+Structure containing all parameters for a GNLSE simulation.
+"""
+struct GNLSEProblem{T <: Complex}
+    medium::Medium
+    grid::Grid
+    initial_pulse::Pulse{T}
+    sim_params::SimParams
+    gamma_coefficient::AbstractGammaCoefficient
+end
+
+"""
     BlowWood <: RamanModel
 
 Single Lorentzian Raman response model from K. J. Blow & D. Wood.
