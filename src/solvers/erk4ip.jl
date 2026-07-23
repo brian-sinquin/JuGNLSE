@@ -3,8 +3,10 @@ using FFTW: fftshift!
 using LinearAlgebra: mul!
 using ProgressMeter: Progress, update!
 
-import ..build_physics_model, ..PhysicsModel
-using ..JuGNLSE: GNLSEProblem, Solution, Pulse, SimParams, AbstractGammaCoefficient, photon_number
+# The functions and types are already available in the JuGNLSE module.
+# We do not need any prefix for imports from the current module.
+# import ..build_physics_model, ..PhysicsModel
+# using ..JuGNLSE: GNLSEProblem, Solution, Pulse, SimParams, AbstractGammaCoefficient, photon_number
 
 """
     ERK4IP <: AbstractGNLSESolver

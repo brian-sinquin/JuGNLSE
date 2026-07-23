@@ -64,7 +64,7 @@ solution = solve(pulse, params)
 # References
 
 Adapted from gnlse-python (https://github.com/WUST-FOG/gnlse-python)
-G. P. Agrawal, "Nonlinear Fiber Optics" (Academic Press, 2019)
+G. P. Agrawal, \"Nonlinear Fiber Optics\" (Academic Press, 2019)
 """
 module JuGNLSE
 
@@ -83,15 +83,9 @@ include("raman.jl")
 include("gamma.jl")
 include("nonlinearity.jl")
 
-"""
-    solve(problem, solver; progress)
-Forward declaration to allow pipeline steps to reference the generic solver interface.
-"""
-function solve end
-
+# Solvers
 # Solvers
 include("solvers/interface.jl")
-include("solver.jl") # Solve implementation
 include("analysis.jl")
 
 # Export types

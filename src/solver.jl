@@ -4,10 +4,6 @@ Main solver interface following gnlse-python conventions.
 Reference: gnlse-python GNLSE.run()
 """
 
-# Access the Solvers submodule defined in solvers/interface.jl
-import .Solvers
-using .Solvers: AbstractGNLSESolver, ERK4IP # Import specific types/constructors
-
 """
     solve(problem::GNLSEProblem, solver::AbstractGNLSESolver=ERK4IP(); progress::Bool=true)
 
@@ -23,6 +19,7 @@ This is the main entry point for running a simulation.
   - `Solution`: A `Solution` object containing the pulse's evolution through the fiber.
 """
 function solve(problem::GNLSEProblem, solver::AbstractGNLSESolver=ERK4IP(); progress::Bool=true)
-    # Delegate the call to the solve function defined within the Solvers module
-    return Solvers.solve(problem, solver; progress=progress)
+    # The Solvers module wrapper was removed. The `solve` function is now directly in JuGNLSE namespace.
+    # We call the solve function defined in solvers/interface.jl
+    return solve(problem, solver; progress=progress)
 end
