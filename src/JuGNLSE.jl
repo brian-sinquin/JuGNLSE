@@ -74,7 +74,7 @@ using LinearAlgebra
 # Physical constants - natural SI units
 const c = 299792458.0  # Speed of light [m/s]
 
-# Include submodules
+# Core Types & Dispatch
 include("types.jl")
 include("grid.jl")
 include("pulses.jl")
@@ -83,29 +83,26 @@ include("raman.jl")
 include("gamma.jl")
 
 """
-    AbstractGNLSESolver
-
-Abstract type for GNLSE solvers.
+    solve(problem, solver; progress)
+Forward declaration to allow pipeline steps to reference the generic solver interface.
 """
-abstract type AbstractGNLSESolver end # Defined at top level for submodules to extend
-export AbstractGNLSESolver # Export it
-
-include("nonlinearity.jl")
-include("propagation_steps.jl") # New: Propagation pipeline steps
+function solve end
 
 # Solvers
 include("solvers/interface.jl")
-
-include("solver.jl")
+include("solvers/erk4ip.jl")
+include("solvers/rk4.jl")
+include("solver.jl") # Solve implementation
 include("analysis.jl")
 
 # Export types
 export Medium, SimParams, Grid, Pulse, Solution
 export RamanModel, BlowWood, LinAgrawal, Hollenbeck
 export DispersionModel, TaylorDispersion, TabulatedDispersion
-export AbstractGammaCoefficient, ConstantGamma, ZDependentGamma, WavelengthDependentGamma, GNLSEProblem, AbstractGNLSESolver
-export AbstractPropagationStep, Fiber, Loss, Filter, Amplifier, propagate! # New: Propagation pipeline exports
-export PhysicsModel  # Internal physics model struct
+export AbstractGammaCoefficient, ConstantGamma, ZDependentGamma, WavelengthDependentGamma, GNLSEProblem
+export AbstractGNLSESolver
+export AbstractPropagationStep, Fiber, Loss, Filter, Amplifier, propagate!
+export PhysicsModel
 
 # Export grid functions
 export create_grid, wavelength_grid
