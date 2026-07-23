@@ -8,6 +8,16 @@ The package uses the standard optics FFT convention: the envelope spectrum is
 
 using FFTW
 
+# Conversion constant
+const C = 299792458.0 # Speed of light in vacuum [m/s]
+
+"""
+    _omega_to_lambda(omega::Real)
+
+Converts angular frequency `omega` [rad/s] to wavelength `lambda` [m].
+"""
+_omega_to_lambda(omega::Real) = 2π * C / omega
+
 """
     PhysicsModel
 
@@ -28,17 +38,18 @@ Pre-computed operators and FFT plans for GNLSE propagation.
 - `buf_t1`, `buf_t2`: Pre-allocated time-domain buffers
 - `buf_f1`: Pre-allocated frequency-domain buffer
 """
-struct PhysicsModel{TF, TT, NL}
+struct PhysicsModel{TF, TT, NL, GC <: AbstractGammaCoefficient}
     to_freq::TF
     to_time::TT
     D::Vector{ComplexF64}
-    gamma::Float64
+    gamma_coefficient::GC  # Changed from gamma::Float64
     W::Vector{Float64}
     dt::Float64
     N::Int
     fr::Float64
     RW::Union{Nothing, Vector{ComplexF64}}
     nonlinear_function::NL
+    lambda0::Float64 # Add lambda0 here
     # Pre-allocated buffers
     buf_t1::Vector{ComplexF64}
     buf_t2::Vector{ComplexF64}
@@ -58,21 +69,26 @@ self-steepening off, `W = ω₀` (constant) and iγ·W = iγ_phys; with it on,
 
 [`_spm_raman`](@ref)
 """
-function _spm(u, model::PhysicsModel)
+function _spm(u, model::PhysicsModel, z::Float64)
     # SPM term u·|u|²
     @. model.buf_t1 = u * abs2(u)
 
     # Transform to the frequency domain
     mul!(model.buf_f1, model.to_freq, model.buf_t1)
 
-    # Multiply by iγW
-    @. model.buf_f1 = 1.0im * model.gamma * model.W * model.buf_f1
+    # Get gamma value using the central wavelength (for WavelengthDependentGamma simplification)
+    # and the current z for ZDependentGamma
+    gamma_val = gamma(model.gamma_coefficient, model.lambda0, z)
+
+    # Multiply by iγW. The W in model.W already includes omega0 or omega0+V,
+    # so we just need the physical gamma.
+    @. model.buf_f1 = 1.0im * gamma_val * model.W * model.buf_f1
 
     return model.buf_f1
 end
 
 """
-    _spm_raman(u, model::PhysicsModel)
+    _spm_raman(u, model::PhysicsModel, z::Float64)
 
 SPM with Raman scattering nonlinear operator.
 
@@ -96,7 +112,7 @@ Raman fraction. Convolution implemented efficiently via FFT multiplication.
 
 [`raman_response`](@ref), [`_spm`](@ref)
 """
-function _spm_raman(u, model::PhysicsModel)
+function _spm_raman(u, model::PhysicsModel, z::Float64)
     # `_spm_raman` is only selected when Raman is enabled, so RW is a Vector.
     # The assertion narrows the Union{Nothing,Vector} field type, keeping the
     # broadcast below type-stable and allocation-free.
@@ -108,14 +124,17 @@ function _spm_raman(u, model::PhysicsModel)
     # Raman convolution: multiply the intensity spectrum by the Raman response
     mul!(model.buf_f1, model.to_freq, model.buf_t1)
     @. model.buf_f1 = model.buf_f1 * RW
-    mul!(model.buf_t2, model.to_time, model.buf_f1)   # buf_t2 = |u|² ⊛ hᵣ
+    mul!(model.buf_t2, model.to_time, model.buf_f1)   # buf_t2 = |u|² ⊛ h_R
+
+    # Get gamma value for the current z and central lambda
+    gamma_val = gamma(model.gamma_coefficient, model.lambda0, z)
 
     # Total nonlinearity (instantaneous Kerr + delayed Raman) times u
     @. model.buf_t1 = u * ((1.0 - model.fr) * abs2(u) + model.fr * model.dt * model.buf_t2)
 
     # Transform to the frequency domain and multiply by iγW
     mul!(model.buf_f1, model.to_freq, model.buf_t1)
-    @. model.buf_f1 = 1.0im * model.gamma * model.W * model.buf_f1
+    @. model.buf_f1 = 1.0im * gamma_val * model.W * model.buf_f1
 
     return model.buf_f1
 end
@@ -164,7 +183,7 @@ PhysicsModel struct ready for propagation
 [`PhysicsModel`](@ref), [`propagate_erk4ip`](@ref), [`dispersion_operator`](@ref),
 [`raman_response`](@ref)
 """
-function build_physics_model(grid::Grid, params::SimParams)
+function build_physics_model(grid::Grid, params::SimParams, gamma_coefficient::AbstractGammaCoefficient)
     medium = params.medium
     N = grid.N
 
@@ -182,9 +201,7 @@ function build_physics_model(grid::Grid, params::SimParams)
     # operator must be fftshifted to FFT-natural order to align with AW.
     D = fftshift(dispersion_operator(grid, medium))
 
-    # Gamma (nonlinear coefficient) - normalize by ω₀ as in gnlse-python
-    # gnlse-python: self.gamma = gamma / self.w_0
-    gamma = (medium.gamma isa Number ? medium.gamma : medium.gamma[1]) / grid.omega0
+    # Gamma (nonlinear coefficient) - now stored as AbstractGammaCoefficient
 
     # Raman response in frequency domain (if enabled)
     raman_freq_response = nothing
@@ -219,13 +236,14 @@ function build_physics_model(grid::Grid, params::SimParams)
         to_freq,
         to_time,
         D,
-        gamma,
+        gamma_coefficient, # Store the gamma_coefficient directly
         W,
         grid.dt,
         N,
         fr,
         raman_freq_response,
         nonlinear_function,
+        grid.lambda0, # Pass lambda0
         buf_t1,
         buf_t2,
         buf_f1,

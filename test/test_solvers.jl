@@ -76,4 +76,25 @@ using JuGNLSE
               sum(abs2, st.At[:, end])
         @test rel < 1e-6
     end
+
+    @testset "Solver interface and RK4" begin
+        grid = create_grid(2^10, 10e-12, 835e-9)
+        medium = Medium(0.02, 0.11, 0.0, [-1.0e-26], 835e-9)
+        pulse = sech_pulse(grid, 100.0, 100e-15)
+        problem = GNLSEProblem(pulse, medium, SimParams(; raman_model=nothing, self_steepening=false, z_saves=8))
+
+        # Test with default ERK4IP solver
+        sol_erk4ip = solve(problem, ERK4IP(); progress=false)
+        @test all(isfinite, sol_erk4ip.At)
+
+        # Test with RK4 solver
+        sol_rk4 = solve(problem, RK4(dz=1e-5); progress=false) # Smaller dz for RK4
+        @test all(isfinite, sol_rk4.At)
+
+        # Compare results (ERK4IP should be more accurate for the same 'effective' step size)
+        # This is a qualitative test, as RK4 needs a much smaller step size to match ERK4IP
+        rel = sum(abs2, sol_erk4ip.At[:, end] .- sol_rk4.At[:, end]) /
+              sum(abs2, sol_erk4ip.At[:, end])
+        @test rel < 1e-2 # Expect some difference, but should be reasonably close
+    end
 end

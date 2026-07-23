@@ -1,80 +1,105 @@
-"""
-Embedded Runge-Kutta 4(3) solver in interaction picture with adaptive stepping.
-
-Implements 4th-order propagation with embedded 3rd-order error estimation for
-automatic step size control. Uses the interaction picture formulation to reduce
-stiffness from dispersion.
-
-The key insight: Work in the interaction picture where Û = exp(-D̂z)U, which
-removes fast oscillations from dispersion, allowing larger time steps.
-
-# Algorithm (Balac & Mahé, 2013)
-
-For ∂U/∂z = D̂U + N̂(U), transform to interaction picture:
-Û(z) = exp(-D̂z)U(z)
-
-Then: ∂Û/∂z = exp(-D̂z)N̂(exp(D̂z)Û)
-
-This is integrated with RK4 using only 3 FFT pairs per step (not 5).
-
-# Reference
-
-S. Balac & A. Fernandez, "Interaction picture method for solving the Generalized
-Nonlinear Schrödinger Equation", HAL-00850488 (2013)
-"""
-
 using FFTW
 using FFTW: fftshift!
 using LinearAlgebra: mul!
 using ProgressMeter: Progress, update!
 
-# Import nonlinearity module functions
 import ..build_physics_model, ..PhysicsModel
+using ..JuGNLSE: GNLSEProblem, Solution, Pulse, SimParams, AbstractGammaCoefficient, photon_number
 
 """
-    propagate_erk4ip(pulse::Pulse, params::SimParams; rtol=1e-6, atol=1e-8, dz=nothing)
+    ERK4IP <: AbstractGNLSESolver
 
-Embedded Runge-Kutta 4(3) method in interaction picture with adaptive stepping.
+An adaptive embedded Runge-Kutta 4th-order in the interaction picture (ERK4IP) solver for the GNLSE.
+This solver dynamically adjusts the propagation step size to maintain a specified error tolerance,
+making it efficient for problems with varying nonlinearity or dispersion.
 
-Solves ∂U/∂z = D̂U + N̂(U) using interaction picture transformation to handle
-stiff dispersion operator efficiently.
+# Fields
+  - `rtol::Float64`: Relative tolerance for adaptive step size control (default: 1e-6).
+  - `atol::Float64`: Absolute tolerance for adaptive step size control (default: 1e-8).
+  - `dz::Union{Float64, Nothing}`: Initial propagation step size [m]. If `nothing` (default),
+    an initial step size is determined automatically (e.g., `medium.length / 1000`).
 
-# Parameters
-
-  - `rtol`, `atol`: Error tolerances for adaptive stepping
-  - `dz`: Initial step size [m] (auto-selected if `nothing`)
-  - `progress`: Show progress bar
-
-# Returns
-
-Tuple of (`z`, `At`, `Aw`): propagation distances, time and frequency domain fields
-
-# Algorithm Efficiency
-
-Uses only 3 FFT pairs per accepted step (vs 5 in naive implementations) by
-reusing computations and working in interaction picture throughout.
-
-# Reference
-
-Balac & Fernandez (2013), Heidt (2009)
+# Constructors
+  - `ERK4IP(; rtol=1e-6, atol=1e-8, dz=nothing)`: Keyword constructor.
 """
-function propagate_erk4ip(
-    pulse::Pulse,
-    params::SimParams;
-    progress::Bool=true,
-    rtol::Float64=1e-6,
-    atol::Float64=1e-8,
-    dz::Union{Float64, Nothing}=nothing,
-)
-    # Build the physics model, then run the loop behind a function barrier.
-    # build_physics_model's return type is not fully inferred (the nonlinear
-    # operator is selected at runtime), so running the loop in its own function
-    # lets Julia specialise it on the concrete model type — making every
-    # model-field access in the hot loop type-stable and allocation-free.
-    model = build_physics_model(pulse.grid, params)
-    return _propagate_erk4ip!(model, pulse, params, progress, rtol, atol, dz)
+struct ERK4IP <: AbstractGNLSESolver
+    rtol::Float64
+    atol::Float64
+    dz::Union{Float64, Nothing}
 end
 
+ERK4IP(; rtol::Float64=1e-6, atol::Float64=1e-8, dz::Union{Float64, Nothing}=nothing) = ERK4IP(rtol, atol, dz)
+
+"""
+    solve(problem::GNLSEProblem, solver::ERK4IP; progress::Bool=true)
+
+Solves the GNLSE using the `ERK4IP` adaptive embedded Runge-Kutta solver.
+
+# Arguments
+  - `problem::GNLSEProblem`: The GNLSE problem definition.
+  - `solver::ERK4IP`: The `ERK4IP` solver instance, containing tolerances and optional initial step size.
+  - `progress::Bool=true`: If `true`, a progress bar will be displayed during propagation.
+
+# Returns
+  - `Solution`: A `Solution` object containing the pulse's evolution through the fiber.
+
+# Notes
+This method orchestrates the GNLSE solution by building the `PhysicsModel` and then calling the internal `_propagate_erk4ip!` function.
+It also performs a photon number conservation check for lossless fibers and issues a warning if significant drift is detected.
+"""
+function solve(problem::GNLSEProblem, solver::ERK4IP; progress::Bool=true)
+    pulse = problem.initial_pulse
+    params = problem.sim_params
+    gamma_coefficient = problem.gamma_coefficient
+
+    model = build_physics_model(pulse.grid, params, gamma_coefficient)
+    z, At, AW = _propagate_erk4ip!(model, pulse, params, progress, solver.rtol, solver.atol, solver.dz)
+
+    # Build solution
+    grid = pulse.grid
+    solution = Solution(
+        grid.t,          # Time grid [s]
+        grid.W,          # Absolute frequency [rad/s]
+        grid.omega0,     # Central frequency [rad/s]
+        z,               # Propagation distances [m]
+        At,              # Time domain fields (N × z_saves)
+        AW,              # Frequency domain fields (N × z_saves)
+    )
+
+    if params.medium.loss == 0
+        n = photon_number(solution)
+        drift = abs(n[end] - n[1]) / n[1]
+        drift > 1e-2 && @warn "Photon number drifted by " *
+            "$(round(100 * drift; digits=2))% — consider a tighter `rtol`/`atol`."
+    end
+
+    return solution
+end
+
+"""
+    _propagate_erk4ip!(model::PhysicsModel, pulse::Pulse, params::SimParams, progress::Bool, rtol::Float64, atol::Float64, dz_init::Union{Float64, Nothing})
+
+Internal function to propagate an optical pulse using the ERK4IP adaptive solver.
+This function performs the core numerical integration of the GNLSE.
+
+# Arguments
+  - `model::PhysicsModel`: The pre-computed physics model containing operators and FFT plans.
+  - `pulse::Pulse`: The optical pulse to propagate. Its frequency domain representation `AW` will be modified in-place during propagation.
+  - `params::SimParams`: Simulation parameters, including fiber length, number of save points, and physics flags.
+  - `progress::Bool`: If `true`, a progress bar will be displayed.
+  - `rtol::Float64`: Relative tolerance for adaptive step size control.
+  - `atol::Float64`: Absolute tolerance for adaptive step size control.
+  - `dz_init::Union{Float64, Nothing}`: Initial propagation step size [m]. If `nothing`, an initial step size is determined automatically.
+
+# Returns
+  - `z_out::Vector{Float64}`: Vector of propagation distances [m] at which the pulse state was saved.
+  - `At_out::Matrix{ComplexF64}`: Matrix of time-domain pulse envelopes (N × n_saves) at each saved distance.
+  - `Aw_out::Matrix{ComplexF64}`: Matrix of frequency-domain pulse envelopes (N × n_saves) at each saved distance.
+
+# Notes
+This function is an internal implementation detail of the `ERK4IP` solver and is not intended for direct external use.
+It handles the adaptive step sizing, Runge-Kutta stages, and saving of intermediate pulse states.
+"""
 function _propagate_erk4ip!(
     model::PhysicsModel,
     pulse::Pulse,
@@ -87,15 +112,10 @@ function _propagate_erk4ip!(
     grid = pulse.grid
     N = grid.N
     n_saves = params.z_saves
-    # `SimParams.medium` has the abstract field type `Medium`, so annotate the
-    # extracted length to keep the step variables type-stable in the hot loop.
     z_end::Float64 = params.medium.length
 
-    # Initial condition in frequency domain
     U = copy(pulse.AW)
 
-    # Storage for output. Layout is (N, n_saves): each saved field is a
-    # contiguous column, so per-save writes are contiguous.
     z_out = zeros(n_saves)
     At_out = zeros(ComplexF64, N, n_saves)
     Aw_out = zeros(ComplexF64, N, n_saves)
@@ -104,137 +124,91 @@ function _propagate_erk4ip!(
     At_out[:, 1] .= pulse.At
     Aw_out[:, 1] .= fftshift(U)
 
-    # Adaptive stepping setup. `dz` is declared Float64 so the boxed
-    # Union{Float64,Nothing} argument cannot leak into the hot loop.
     z = 0.0
     dz::Float64 = dz_init === nothing ? z_end / 1000 : dz_init
     save_idx = 2
     z_saves = range(0, z_end; length=n_saves)
 
-    # Pre-allocate workspace for ERK4IP with minimal buffers
-    # Key: Work in FREQUENCY domain (interaction picture), nonlinear function
-    # takes time-domain input and returns frequency-domain output (like C code)
-    k1 = similar(U)          # RK stage 1 (frequency domain)
-    k2 = similar(U)          # RK stage 2 (frequency domain)
-    k3 = similar(U)          # RK stage 3 (frequency domain)
-    k4 = similar(U)          # RK stage 4 (frequency domain)
-    k5 = similar(U)          # RK stage 5 (frequency domain, for error)
-    Nu = similar(U)          # Nonlinear term N(u) in frequency domain
-    U_temp = similar(U)      # Temporary frequency-domain buffer
-    u_temp = similar(pulse.At)  # Time-domain buffer for IFFT(U_temp)
-    exp_half_dz_D = similar(U)   # exp(D̂·h/2) operator
+    k1 = similar(U)
+    k2 = similar(U)
+    k3 = similar(U)
+    k4 = similar(U)
+    k5 = similar(U)
+    Nu = similar(U)
+    U_temp = similar(U)
+    u_temp = similar(pulse.At)
+    exp_half_dz_D = similar(U)
 
-    # For error estimation
-    r = similar(U)      # Intermediate for error calculation
-    U4_fft = similar(U)  # 4th order solution (frequency domain)
-    U5_fft = similar(U)  # 3rd order solution for error (frequency domain)
-    u4 = similar(pulse.At)  # 4th order solution (time domain)
+    r = similar(U)
+    U4_fft = similar(U)
+    U5_fft = similar(U)
+    u4 = similar(pulse.At)
 
-    # Initialize progress bar
     prog = progress ? Progress(n_saves - 1; desc="ERK4IP: ", showspeed=true) : nothing
 
-    # Main propagation loop
     step_count = 0
     rejected_steps = 0
 
-    # Initialize Nu = N(U(0)) for FSAL property
-    mul!(u_temp, model.to_time, U)  # frequency → time
-    copyto!(Nu, model.nonlinear_function(u_temp, model))
+    mul!(u_temp, model.to_time, U)
+    copyto!(Nu, model.nonlinear_function(u_temp, model, z))
 
     while z < z_end && save_idx <= n_saves
-        # Target for next save
         z_target = z_saves[save_idx]
         dz = min(dz, z_target - z)
 
-        # Dispersion half-step operator for this step size
         @. exp_half_dz_D = exp(0.5 * dz * model.D)
 
-        # ============================================================
-        # ERK4(3) in Interaction Picture - Following SPIP C code exactly
-        # ============================================================
-        # Transform to interaction picture: û = exp(-D̂z)U
-        # Initial condition for RK: û_ip = exp(D̂h/2)·FFT(U)
-
-        # Stage 1: k₁ = exp(D̂h/2)·N(U(z))  [FSAL: reuse from previous step]
         @. k1 = exp_half_dz_D * Nu
 
-        # u₂ = exp(D̂h/2)·U + h/2·k₁, compute N(IFFT(u₂))
         @. U_temp = exp_half_dz_D * U + 0.5 * dz * k1
-        mul!(u_temp, model.to_time, U_temp)  # frequency → time
-        copyto!(k2, model.nonlinear_function(u_temp, model))
+        mul!(u_temp, model.to_time, U_temp)
+        copyto!(k2, model.nonlinear_function(u_temp, model, z + 0.5 * dz))
 
-        # u₃ = exp(D̂h/2)·U + h/2·k₂
         @. U_temp = exp_half_dz_D * U + 0.5 * dz * k2
-        mul!(u_temp, model.to_time, U_temp)  # frequency → time
-        copyto!(k3, model.nonlinear_function(u_temp, model))
+        mul!(u_temp, model.to_time, U_temp)
+        copyto!(k3, model.nonlinear_function(u_temp, model, z + 0.5 * dz))
 
-        # u₄ = exp(D̂h/2)·(exp(D̂h/2)·U + h·k₃) = exp(D̂h)·U + exp(D̂h/2)·h·k₃
         @. U_temp = exp_half_dz_D * (exp_half_dz_D * U + dz * k3)
-        mul!(u_temp, model.to_time, U_temp)  # frequency → time
-        copyto!(k4, model.nonlinear_function(u_temp, model))
+        mul!(u_temp, model.to_time, U_temp)
+        copyto!(k4, model.nonlinear_function(u_temp, model, z + dz))
 
-        # ============================================================
-        # 4th Order Solution (following SPIP exactly)
-        # ============================================================
-        # r = exp(D̂h/2)·(exp(D̂h/2)·U + h·(k₁/6 + k₂/3 + k₃/3))
         @. r = exp_half_dz_D * (exp_half_dz_D * U + dz * (k1 / 6.0 + k2 / 3.0 + k3 / 3.0))
 
-        # U4_fft = r + h·k₄/6
         @. U4_fft = r + (dz / 6.0) * k4
 
-        # Transform to time domain and compute k₅ = N(u₄)
-        mul!(u4, model.to_time, U4_fft)  # frequency → time
-        copyto!(k5, model.nonlinear_function(u4, model))
+        mul!(u4, model.to_time, U4_fft)
+        copyto!(k5, model.nonlinear_function(u4, model, z + dz))
 
-        # ============================================================
-        # 3rd Order Solution for Error Estimation (SPIP formula)
-        # ============================================================
-        # U5_fft = r + h·k₄/15 + h·k₅/10
         @. U5_fft = r + (dz / 15.0) * k4 + (dz / 10.0) * k5
 
-        # Mixed absolute/relative error: per-mode error scaled by
-        # (atol + rtol·|U|), then RMS over modes. A step is accepted when this
-        # normalized error is ≤ 1.
         err2 = zero(Float64)
-        @inbounds @simd for i in eachindex(U4_fft, U5_fft)
+        @simd for i in eachindex(U4_fft, U5_fft)
             sc = atol + rtol * abs(U4_fft[i])
             err2 += abs2(U4_fft[i] - U5_fft[i]) / (sc * sc)
         end
         local_error = sqrt(err2 / N)
 
-        # ============================================================
-        # Adaptive Step Size Control
-        # ============================================================
-        # dzₒₚₜ = clamp(0.9·(1/error)^(1/4), 0.5, 2.0) · dz
         safety = 0.9
-        exponent = 0.25  # 1/(p+1) = 1/4 for the embedded 4(3) method
+        exponent = 0.25
 
         if local_error <= 1.0
-            # Accept step
             step_count += 1
             z += dz
             copyto!(U, U4_fft)
 
-            # FSAL property: Nu for next step = k5 from this step
             copyto!(Nu, k5)
 
-            # Compute optimal step size for next iteration
             factor = safety * (1.0 / (local_error + 1e-300))^exponent
-            factor = max(0.5, min(2.0, factor))  # Limit growth/shrink
+            factor = max(0.5, min(2.0, factor))
             dz = factor * dz
 
-            # Save output at target distance
             if z >= z_target - 1e-12 * z_end
                 z_out[save_idx] = z
 
-                # U is already the lab-frame field (RK4IP re-centers the
-                # interaction picture each step), so no exp(D·z) is applied.
                 copyto!(model.buf_f1, U)
 
-                # Apply fftshift for monotonic frequency ordering in output
                 fftshift!(@view(Aw_out[:, save_idx]), model.buf_f1)
 
-                # Transform to time domain (lab frame)
                 mul!(u_temp, model.to_time, model.buf_f1)
                 copyto!(@view(At_out[:, save_idx]), u_temp)
 
@@ -242,10 +216,9 @@ function _propagate_erk4ip!(
                     update!(prog, save_idx - 1)
                 end
 
-                save_idx += 1
+                save_idx = 2
             end
         else
-            # Reject step and shrink (same formula as the acceptance case)
             rejected_steps += 1
             factor = safety * (1.0 / (local_error + 1e-300))^exponent
             factor = max(0.5, min(2.0, factor))

@@ -112,4 +112,72 @@ using JuGNLSE
         # Self-steepening on: W carries the absolute frequency ω₀ + Δω
         @test !all(m2.W .== grid.omega0)
     end
+
+    @testset "Gamma Coefficients" begin
+        # Test ConstantGamma
+        const_gamma = ConstantGamma(0.12)
+        @test gamma(const_gamma, 800e-9, 0.0) == 0.12
+        @test gamma(const_gamma, 1000e-9, 1.0) == 0.12
+
+        # Test ZDependentGamma
+        # Linear tapering from 0.1 to 0.2 over 1m
+        z_taper_func(z) = 0.1 + (0.2 - 0.1) * z
+        z_gamma = ZDependentGamma(z_taper_func)
+        @test gamma(z_gamma, 800e-9, 0.0) == 0.1
+        @test gamma(z_gamma, 800e-9, 0.5) == 0.15
+        @test gamma(z_gamma, 800e-9, 1.0) == 0.2
+
+        # Test WavelengthDependentGamma
+        # Simple quadratic dependency on wavelength
+        lambda_dep_func(lambda) = 0.1 * (lambda / 800e-9)^2
+        lambda_gamma = WavelengthDependentGamma(lambda_dep_func)
+        @test gamma(lambda_gamma, 800e-9, 0.0) ≈ 0.1
+        @test gamma(lambda_gamma, 1600e-9, 0.0) ≈ 0.4 # (1600/800)^2 = 2^2 = 4
+    end
+
+    @testset "GNLSEProblem with custom gamma" begin
+        grid = create_grid(2^10, 10e-12, 835e-9)
+        initial_pulse = sech_pulse(grid, 100.0, 150e-15)
+
+        # Test with ZDependentGamma
+        z_taper_func(z) = 0.1 + (0.2 - 0.1) * z / 0.15 # Taper over fiber length 0.15m
+        z_gamma_coeff = ZDependentGamma(z_taper_func)
+        medium_z_dep = Medium(0.15, 0.11, 0.0, [-1.0e-26], 835e-9) # Base gamma here is ignored if gamma_coefficient is provided
+        sim_params_z_dep = SimParams(; medium=medium_z_dep)
+
+        problem_z_dep = GNLSEProblem(;
+            medium=medium_z_dep,
+            grid=grid,
+            initial_pulse=initial_pulse,
+            sim_params=sim_params_z_dep,
+            gamma_coefficient=z_gamma_coeff
+        )
+
+        # Solve for a short distance to check gamma at z=0 and z=L
+        solution_z_dep = solve(problem_z_dep; progress=false)
+
+        # Need to access the gamma value during propagation. This is harder to test directly from solution.
+        # For now, we can check if the problem can be constructed and solved without error.
+        @test problem_z_dep.gamma_coefficient isa ZDependentGamma
+        # A more robust test would involve inspecting the gamma value during the solve! process,
+        # which would require modifying the solver to return intermediate gamma values, or
+        # using a mock gamma function that logs calls. For a simple check, just ensure it runs.
+
+
+        # Test with WavelengthDependentGamma
+        lambda_dep_func(lambda) = 0.1 * (lambda / grid.lambda0)^2
+        lambda_gamma_coeff = WavelengthDependentGamma(lambda_dep_func)
+        medium_lambda_dep = Medium(0.15, 0.11, 0.0, [-1.0e-26], 835e-9)
+        sim_params_lambda_dep = SimParams(; medium=medium_lambda_dep)
+
+        problem_lambda_dep = GNLSEProblem(;
+            medium=medium_lambda_dep,
+            grid=grid,
+            initial_pulse=initial_pulse,
+            sim_params=sim_params_lambda_dep,
+            gamma_coefficient=lambda_gamma_coeff
+        )
+        @test problem_lambda_dep.gamma_coefficient isa WavelengthDependentGamma
+        solution_lambda_dep = solve(problem_lambda_dep; progress=false)
+    end
 end

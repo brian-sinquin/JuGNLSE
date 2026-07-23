@@ -146,6 +146,13 @@ Abstract base type for Raman response models.
 abstract type RamanModel end
 
 """
+    AbstractGNLSESolver
+
+Abstract base type for GNLSE solvers.
+"""
+abstract type AbstractGNLSESolver end
+
+"""
     BlowWood <: RamanModel
 
 Single Lorentzian Raman response model from K. J. Blow & D. Wood.
@@ -366,6 +373,107 @@ end
 # ---------------------------------------------------------------------------
 # Compact REPL display
 # ---------------------------------------------------------------------------
+
+"""
+    AbstractGammaCoefficient
+
+Abstract base type for nonlinear coefficient models.
+"""
+abstract type AbstractGammaCoefficient end
+
+"""
+    ConstantGamma(gamma)
+
+Nonlinear coefficient `gamma` [1/(W·m)] assumed to be constant.
+"""
+struct ConstantGamma <: AbstractGammaCoefficient
+    gamma::Float64
+end
+
+ConstantGamma(gamma::Real) = ConstantGamma(Float64(gamma))
+
+"""
+    GNLSEProblem{T<:Complex}
+
+Structure containing all parameters for a GNLSE simulation.
+
+# Fields
+
+  - `medium::Medium`: Fiber medium parameters
+  - `grid::Grid`: Associated time-frequency grid
+  - `initial_pulse::Pulse{T}`: Initial optical pulse envelope
+  - `sim_params::SimParams`: Simulation parameters
+  - `gamma_coefficient::AbstractGammaCoefficient`: Nonlinear coefficient model (constant or lambda-dependent)
+"""
+struct GNLSEProblem{T <: Complex}
+    medium::Medium
+    grid::Grid
+    initial_pulse::Pulse{T}
+    sim_params::SimParams
+    gamma_coefficient::AbstractGammaCoefficient
+
+    function GNLSEProblem{T}(
+        medium::Medium,
+        grid::Grid,
+        initial_pulse::Pulse{T},
+        sim_params::SimParams,
+        gamma_coefficient::AbstractGammaCoefficient,
+    ) where {T <: Complex}
+        # Basic validation (more comprehensive checks can be added later)
+        medium.lambda0 == grid.lambda0 ||
+            throw(ArgumentError("Medium and Grid lambda0 must match"))
+        initial_pulse.grid === grid ||
+            throw(ArgumentError("Initial pulse grid must be the same as the problem grid"))
+        new{T}(medium, grid, initial_pulse, sim_params, gamma_coefficient)
+    end
+end
+
+# Constructor with keyword arguments
+function GNLSEProblem(;
+    medium::Medium,
+    grid::Grid,
+    initial_pulse::Pulse{T},
+    sim_params::SimParams,
+    gamma_coefficient::AbstractGammaCoefficient = ConstantGamma(medium.gamma),
+) where {T <: Complex}
+    GNLSEProblem{T}(medium, grid, initial_pulse, sim_params, gamma_coefficient)
+end
+
+# Compact REPL display for GNLSEProblem
+function Base.show(io::IO, p::GNLSEProblem)
+    print(io, "GNLSEProblem(L=", p.medium.length, " m, N=", p.grid.N, ", λ₀=",
+          round(p.medium.lambda0 * 1e9; digits=2), " nm, γ_model=",
+          nameof(typeof(p.gamma_coefficient)), ")")
+end
+
+# Compact REPL display for ConstantGamma
+Base.show(io::IO, g::ConstantGamma) = print(io, "ConstantGamma(γ=", g.gamma, " /W/m)")
+
+"""
+    ZDependentGamma(gamma_func::Function)
+
+Nonlinear coefficient `gamma` [1/(W·m)] that varies with propagation distance `z` [m].
+`gamma_func` is a function `f(z)` that returns the gamma value at a given `z`.
+"""
+struct ZDependentGamma <: AbstractGammaCoefficient
+    gamma_func::Function
+end
+
+"""
+    WavelengthDependentGamma(gamma_func::Function)
+
+Nonlinear coefficient `gamma` [1/(W·m)] that varies with wavelength `lambda` [m].
+`gamma_func` is a function `f(lambda)` that returns the gamma value at a given `lambda`.
+"""
+struct WavelengthDependentGamma <: AbstractGammaCoefficient
+    gamma_func::Function
+end
+
+# Compact REPL display for ZDependentGamma
+Base.show(io::IO, g::ZDependentGamma) = print(io, "ZDependentGamma(γ(z) model)")
+
+# Compact REPL display for WavelengthDependentGamma
+Base.show(io::IO, g::WavelengthDependentGamma) = print(io, "WavelengthDependentGamma(γ(λ) model)")
 
 """
     show(io::IO, m::TaylorDispersion)

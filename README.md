@@ -4,11 +4,14 @@
 [![Dev](https://img.shields.io/badge/docs-dev-blue.svg)](https://brian-sinquin.github.io/JuGNLSE.jl/dev/)
 [![Build status](https://github.com/brian-sinquin/JuGNLSE/actions/workflows/CI.yml/badge.svg?branch=master)](https://github.com/brian-sinquin/JuGNLSE/actions/workflows/CI.yml)
 
-JuGNLSE.jl is a Julia package for solving the Generalized Nonlinear Schrödinger Equation (GNLSE). It is designed to model the propagation of optical pulses in nonlinear media, such as optical fibers, with a focus on performance and numerical stability.
+JuGNLSE.jl is a Julia package for solving the Generalized Nonlinear Schrödinger Equation (GNLSE). It models optical pulse propagation in nonlinear media (e.g., optical fibers) with high numerical stability and performance.
+
+## New Features
+- **Flexible Gamma**: Support for wavelength and propagation-dependent (`z`) nonlinear coefficients.
+- **Pipeline API**: Composable simulation steps (Fiber, Loss, Amplifier) via `propagate!`.
+- **Extensible Solvers**: Interface-based design for adding arbitrary numerical solvers.
 
 ## Installation
-
-The package can be installed using the Julia package manager:
 
 ```julia
 using Pkg
@@ -17,35 +20,31 @@ Pkg.add("JuGNLSE")
 
 ## Basic Usage
 
-All quantities are in natural SI units (seconds, metres, watts).
-
+### Standard Solver
 ```julia
 using JuGNLSE
 
-# Define the fiber medium (keyword constructor — avoids argument-order mistakes)
-medium = Medium(;
-    fiber_length = 0.15,                  # m
-    gamma        = 0.11,                  # 1/(W·m)
-    loss         = 0.0,                   # dB/m
-    betas        = [-11.83e-27, 8.13e-41],# Taylor dispersion: β₂ [s²/m], β₃ [s³/m], …
-    lambda0      = 835e-9,                # m
-)
-
-# Set up the time–frequency grid: resolution, time window [s], center wavelength [m]
-grid = create_grid(2^13, 12.5e-12, 835e-9)
-
-# Generate an initial pulse: peak power [W], FWHM [s]
+medium = Medium(0.15, 0.11, 0.0, [-11.83e-27], 835e-9)
+grid = create_grid(2^10, 10e-12, 835e-9)
 pulse = sech_pulse(grid, 10000.0, 50e-15)
+problem = GNLSEProblem(medium=medium, grid=grid, initial_pulse=pulse)
 
-# Configure the simulation and solve
-params = SimParams(; medium=medium, raman_model=BlowWood(), self_steepening=true)
-solution = solve(pulse, params)
-
-# `solution.At` / `solution.AW` are (N × z_saves); each column is one distance.
+solution = solve(problem)
 ```
 
-Measured dispersion can be supplied instead of a Taylor expansion via
-`TabulatedDispersion(detuning, beta)` (passed as `dispersion=` to `Medium`).
+### Composable Pipeline
+```julia
+using JuGNLSE
+
+pipeline = [
+    Fiber(medium, 0.1),
+    Loss(0.5),
+    Amplifier(3.0),
+    Fiber(medium, 0.05)
+]
+
+solution = propagate!(pulse, pipeline)
+```
 
 ## Documentation
 

@@ -80,10 +80,25 @@ include("grid.jl")
 include("pulses.jl")
 include("dispersion.jl")
 include("raman.jl")
+include("gamma.jl")
+
+"""
+    AbstractGNLSESolver
+
+Abstract type for GNLSE solvers.
+"""
+abstract type AbstractGNLSESolver end # Defined at top level for submodules to extend
+export AbstractGNLSESolver # Export it
+
 include("nonlinearity.jl")
+include("propagation_steps.jl") # New: Propagation pipeline steps
 
 # Solvers
+# Explicitly export the submodules to avoid scope issues
+export Solvers
+include("solvers/interface.jl")
 include("solvers/erk4ip.jl")
+include("solvers/rk4.jl")
 
 include("solver.jl")
 include("analysis.jl")
@@ -92,6 +107,8 @@ include("analysis.jl")
 export Medium, SimParams, Grid, Pulse, Solution
 export RamanModel, BlowWood, LinAgrawal, Hollenbeck
 export DispersionModel, TaylorDispersion, TabulatedDispersion
+export AbstractGammaCoefficient, ConstantGamma, ZDependentGamma, WavelengthDependentGamma, GNLSEProblem, AbstractGNLSESolver
+export AbstractPropagationStep, Fiber, Loss, Filter, Amplifier, propagate! # New: Propagation pipeline exports
 export PhysicsModel  # Internal physics model struct
 
 # Export grid functions
@@ -106,8 +123,12 @@ export dispersion_operator, propagation_constant
 # Export Raman functions
 export raman_response
 
+# Export gamma functions
+export gamma
+
 # Export solver interface
 export solve
+export ERK4IP, RK4
 
 # Export physics model builder
 export build_physics_model

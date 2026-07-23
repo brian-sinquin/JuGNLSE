@@ -4,35 +4,38 @@ Main solver interface following gnlse-python conventions.
 Reference: gnlse-python GNLSE.run()
 """
 
-"""
-    solve(pulse::Pulse, params::SimParams; progress::Bool=true)
+using .Solvers: AbstractGNLSESolver, ERK4IP
 
-Solve GNLSE following gnlse-python conventions using adaptive ERK4IP method.
+"""
+    solve(problem::GNLSEProblem, solver::AbstractGNLSESolver=ERK4IP(); progress::Bool=true)
+
+Solves the Generalized Nonlinear Schrödinger Equation (GNLSE) for a given `GNLSEProblem`.
+This is the main entry point for running a simulation.
 
 # Arguments
-
-  - `pulse::Pulse`: Initial pulse condition
-  - `params::SimParams`: Simulation parameters
-  - `progress::Bool`: Show progress bar (default: true)
+  - `problem::GNLSEProblem`: A `GNLSEProblem` object containing all necessary simulation parameters (medium, grid, initial pulse, simulation parameters, and gamma coefficient).
+  - `solver::AbstractGNLSESolver=ERK4IP()`: The solver to use for propagation. Defaults to `ERK4IP`.
+  - `progress::Bool=true`: If `true`, a progress bar will be displayed during the simulation.
 
 # Returns
-
-  - `Solution`: Solution structure with t, W, omega0, Z, At, AW
+  - `Solution`: A `Solution` object containing the pulse's evolution through the fiber.
 
 # Example
 
 ```julia
-# Create grid (natural SI units: s, m, W)
+using JuGNLSE
+
+# Define grid (natural SI units: s, m, W)
 grid = create_grid(2^13, 12.5e-12, 835e-9)  # resolution, time_window [s], λ [m]
 
-# Create medium: Medium(L[m], γ[1/W/m], loss[dB/m], betas[sⁿ/m], λ[m])
+# Define medium: Medium(L[m], γ[1/W/m], loss[dB/m], betas[sⁿ/m], λ[m])
 medium = Medium(0.15, 0.11, 0.0, [-11.83e-27], 835e-9)
 
 # Create pulse
 pulse = sech_pulse(grid, 10000.0, 50e-15)  # Pmax [W], FWHM [s]
 
 # Setup simulation parameters
-params = SimParams(;
+sim_params = SimParams(;
     medium=medium,
     z_saves=200,
     raman_model=BlowWood(),
@@ -41,40 +44,18 @@ params = SimParams(;
     atol=1e-8,
 )
 
-# Solve
-solution = solve(pulse, params)
+# Create the GNLSE problem
+problem = GNLSEProblem(medium=medium, grid=grid, initial_pulse=pulse, sim_params=sim_params)
+
+# Solve the problem
+solution = solve(problem)
 ```
 
 # Notes
+Integrates the GNLSE with the specified solver. All quantities are in natural SI units; the envelope spectrum follows the standard optics convention `AW = ifft(At)`.
 
-Integrates the GNLSE with the adaptive ERK4IP solver. All quantities are in
-natural SI units; the envelope spectrum follows the standard optics convention
-`AW = ifft(At)`.
+Photon number conservation is checked for lossless fibers, and a warning is issued if significant drift occurs, suggesting a tighter `rtol`/`atol`.
 """
-function solve(pulse::Pulse, params::SimParams; progress::Bool=true)
-    z, At, AW = propagate_erk4ip(
-        pulse, params; progress=progress, rtol=params.rtol, atol=params.atol
-    )
-
-    # Build solution
-    grid = pulse.grid
-    solution = Solution(
-        grid.t,          # Time grid [s]
-        grid.W,          # Absolute frequency [rad/s]
-        grid.omega0,     # Central frequency [rad/s]
-        z,               # Propagation distances [m]
-        At,              # Time domain fields (N × z_saves)
-        AW,              # Frequency domain fields (N × z_saves)
-    )
-
-    # Photon number is conserved by the GNLSE for a lossless fiber; a drift
-    # indicates the step-size tolerance is too loose.
-    if params.medium.loss == 0
-        n = photon_number(solution)
-        drift = abs(n[end] - n[1]) / n[1]
-        drift > 1e-2 && @warn "Photon number drifted by " *
-            "$(round(100 * drift; digits=2))% — consider a tighter `rtol`/`atol`."
-    end
-
-    return solution
+function solve(problem::GNLSEProblem, solver::AbstractGNLSESolver=ERK4IP(); progress::Bool=true)
+    return Solvers.solve(problem, solver; progress=progress)
 end
