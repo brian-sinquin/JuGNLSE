@@ -5,15 +5,13 @@ using LinearAlgebra
 using Random
 
 # Load core modules in order
-include("types.jl")
-include("grid.jl")
-include("pulses.jl")
-include("dispersion.jl")
-include("raman.jl")
-include("gamma.jl")
-include("nonlinearity.jl")
-include("solvers/interface.jl")
-include("solver.jl")
+include("core.jl")
+include("propagation_steps.jl")
+
+# Solvers
+include("erk4ip.jl")
+include("rk4.jl")
+include("solver.jl") 
 include("analysis.jl")
 
 # Exports
