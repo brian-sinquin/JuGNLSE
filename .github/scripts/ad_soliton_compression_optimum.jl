@@ -223,13 +223,27 @@ end
 tau_at(Nsol) = output_duration([Nsol], model, pulse, params)
 
 # --- Sanity check the forward-mode gradient against finite differences ---
+# tau_eff is printed next to the derivatives on purpose. This check runs the
+# objective on the *fixed* (L, n_steps) chosen for N_target, so at orders well
+# above N_target it is being asked for a configuration it was never sized for.
+# When that fails it must be reported as the objective failing, not as the AD
+# rule disagreeing with FD -- a bare "Enzyme = NaN  FD = NaN" row says nothing
+# and looks like a broken gradient.
 println("\nForward-mode gradient check (Enzyme vs. central differences):")
 for Ncheck in (3.0, 4.0, 5.5)
     h = 1e-5
+    tau = tau_at(Ncheck)
     g_ad = dtau_dN(Ncheck)
     g_fd = (tau_at(Ncheck + h) - tau_at(Ncheck - h)) / (2h)
-    @printf("  N = %.2f: Enzyme = %+.6e  FD = %+.6e  rel.diff = %.3e\n",
-        Ncheck, g_ad, g_fd, abs(g_ad - g_fd) / max(abs(g_fd), 1e-300))
+    if !isfinite(tau) || !isfinite(g_ad) || !isfinite(g_fd)
+        _, I_probe = simulate(Ncheck, L; nsteps=n_steps)
+        @printf("  N = %.2f: objective not finite -- skipped", Ncheck)
+        @printf(" (tau_eff = %g, Enzyme = %g, FD = %g;", tau, g_ad, g_fd)
+        @printf(" max I = %g, sum I = %g)\n", maximum(I_probe), sum(I_probe))
+        continue
+    end
+    @printf("  N = %.2f: tau_eff = %.6e  Enzyme = %+.6e  FD = %+.6e  rel.diff = %.3e\n",
+        Ncheck, tau, g_ad, g_fd, abs(g_ad - g_fd) / max(abs(g_fd), 1e-300))
 end
 
 # --- Scan and bisection ---
@@ -243,22 +257,44 @@ for (k, Nv) in enumerate(N_scan)
 end
 
 """
-Minimum of τ_eff(N) by bisecting its derivative on `[lo, hi]`, which must
-bracket a sign change. Kept in a function on purpose: assigning to `lo`/`hi`
-inside a top-level `for` hits Julia's soft-scope rule and silently creates new
-locals, which is how the first version of this script failed in CI.
+Minimum of τ_eff(N) by bisecting its derivative on `[lo, hi]`, which must bracket
+a sign change once `hi` has been pulled down to where the objective is still
+finite. Kept in a function on purpose: assigning to `lo`/`hi` inside a top-level
+`for` hits Julia's soft-scope rule and silently creates new locals, which is how
+the first version of this script failed in CI.
 """
 function bisect_derivative(deriv, lo, hi; iters=28)
-    d_lo, d_hi = deriv(lo), deriv(hi)
+    # Pull the upper end down until the derivative there is finite. The
+    # objective stops being computable some way above N_target (the gradient
+    # check above prints where), and a NaN endpoint would sail through the sign
+    # test below: every comparison against NaN is false, so `d_hi <= 0` does
+    # not reject it. The same blindness inside the loop -- `NaN < 0` being
+    # false -- would quietly steer the bracket, so the midpoint is checked too.
+    d_hi = deriv(hi)
+    while hi > lo && !isfinite(d_hi)
+        hi = lo + 0.75 * (hi - lo)
+        d_hi = deriv(hi)
+    end
+    d_lo = deriv(lo)
+    if !isfinite(d_lo) || !isfinite(d_hi)
+        @printf("\ndtau/dN is not finite on [%.2f, %.2f]", lo, hi)
+        @printf(" (d_lo = %g, d_hi = %g).\n", d_lo, d_hi)
+        return NaN, false
+    end
     if d_lo >= 0 || d_hi <= 0
         @printf("\nNo sign change of dtau/dN on [%.2f, %.2f]", lo, hi)
         @printf(" (d_lo = %+.3e, d_hi = %+.3e).\n", d_lo, d_hi)
         return NaN, false
     end
-    println("\nBisecting dtau/dN = 0 ...")
+    @printf("\nBisecting dtau/dN = 0 on [%.4f, %.4f] ...\n", lo, hi)
     for _ in 1:iters
         mid = 0.5 * (lo + hi)
-        if deriv(mid) < 0
+        d_mid = deriv(mid)
+        if !isfinite(d_mid)
+            @printf("  dtau/dN not finite at N = %.6f -- stopping early.\n", mid)
+            return 0.5 * (lo + hi), false
+        end
+        if d_mid < 0
             lo = mid
         else
             hi = mid
