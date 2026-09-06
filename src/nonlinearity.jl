@@ -418,7 +418,8 @@ function _amplifying_spm_raman(u, model::PhysicsModel, z::Real)
     @. model.buf_f1 = model.buf_f1 * model.gamma_W
 
     # Saturation is an amplitude gain [1/m], independent of gamma_W. The Raman
-    # convolution is no longer needed, so reuse buf_t2 for its spectrum.
+    # convolution in buf_t2 must be fully consumed into buf_t1 above before
+    # overwriting buf_t2 with the gain spectrum; do not move this reuse earlier.
     @. model.buf_t1 = delta_g * u
     mul!(model.buf_t2, model.to_freq, model.buf_t1)
     @. model.buf_f1 += model.buf_t2

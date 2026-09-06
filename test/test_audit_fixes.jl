@@ -185,3 +185,85 @@ end
         @test sol.At[:, end] ≈ u .* exp.(0.7im .* abs2.(u) .* active.length) rtol=1e-8
     end
 end
+
+@testset "Remaining review regressions" begin
+    grid = create_grid(128, 2e-12, 1550e-9)
+    dw = 2π / (grid.N * grid.dt)
+    tone = cis.(-7dw .* grid.t)
+    pulse = Pulse(tone, ifft(tone), grid)
+
+    @testset "Vectorial identity and cascades" begin
+        input = VectorialPulse(tone, 0.3im .* cis.(11dw .* grid.t), grid)
+        dispersion = TaylorDispersion([0.0])
+        medium = BirefringentMedium(0.02, 0.0, 0.0, dispersion, dispersion, 0.0, grid.lambda0)
+        for solver in (SSFM(0.002),), save_freq in (true, false)
+            params = SimParams(; medium, solver, save_freq, z_saves=2,
+                raman_model=nothing, self_steepening=false)
+            sol = solve(input, params; progress=false)
+            restored = VectorialPulse(sol)
+            for pol in 1:2
+                @test restored.AW[:, pol] ≈ ifft(restored.At[:, pol]) rtol=1e-12
+            end
+            @test restored.At ≈ input.At rtol=1e-10
+            @test solve(input, [params, params]; progress=false)[end].At[:, :, end] ≈ input.At rtol=1e-10
+        end
+    end
+
+    @testset "Analysis frequency alignment" begin
+        @test pulse_energy(pulse) ≈ sum(abs2, tone) * grid.dt
+        @test spectral_centroid(pulse) ≈ 7dw rtol=1e-12
+        @test photon_number(pulse) ≈ 1 / (grid.omega0 + 7dw) rtol=1e-12
+        spec = fill(0.1 + 0.0im, grid.N)
+        spec[grid.N ÷ 2 .+ (-2:2) .+ 1] .= 1
+        broad = Pulse(fft(ifftshift(spec)), ifftshift(spec), grid)
+        @test spectral_bandwidth(broad) ≈ 4dw / (2π)
+        # Nonuniform coherence exposes a half-array permutation.
+        spec2 = copy(spec)
+        spec2[grid.N ÷ 2 + 1] = im
+        second = Pulse(fft(ifftshift(spec2)), ifftshift(spec2), grid)
+        expected = spectral_coherence([spec, spec2])
+        @test spectral_coherence([broad, second]) ≈ expected
+        for saved in (true, false)
+            sols = [Solution(grid.t, grid.W, grid.omega0, [0.0],
+                reshape(p.At, :, 1), saved ? reshape(fftshift(p.AW), :, 1) : zeros(ComplexF64, 0, 0))
+                for p in (broad, second)]
+            @test spectral_coherence(sols) ≈ expected atol=1e-12
+            @test photon_number(sols[1])[1] ≈ photon_number(broad) rtol=1e-12
+        end
+        _, V, S = spectrogram(pulse; n_delay=3, gate_fwhm=1e-10)
+        @test V[argmax(S[:, 2])] ≈ 7dw
+        _, Vshg, frog = shg_frog_trace(pulse; n_delay=3)
+        @test Vshg[argmax(frog[:, 2])] ≈ 14dw
+    end
+
+    @testset "C4 saturated gain and exact tone phase" begin
+        # A single Fourier tone retains constant temporal intensity. Its energy
+        # obeys ln(E/E0)+(E-E0)/Esat=g0*z, and phase is gamma_eff*∫P dz.
+        for gamma in (0.7, FrequencyDependentNonlinearity(w -> 0.7w / grid.omega0)),
+            shock in (false, true), raman in (nothing, BlowWood())
+            active = AmplifyingMedium(length=0.1, gamma=gamma, g0=2.0,
+                Esat=pulse_energy(pulse), betas=[0.0], lambda0=grid.lambda0)
+            params = SimParams(medium=active, z_saves=4, raman_model=raman,
+                self_steepening=shock, solver=ERK4IP(rtol=1e-10, atol=1e-12))
+            model = build_physics_model(grid, params)
+            fields = map(fieldnames(typeof(model))) do name
+                name === :aux_data ? (; g0=active.g0, Esat=active.Esat) : getfield(model, name)
+            end
+            deterministic = Soliton.PhysicsModel(fields...)
+            Z, At, _ = Soliton.propagate(deterministic, pulse, params, params.solver, false)
+            E0 = pulse_energy(pulse)
+            gamma_eff = 0.7 * ((shock || gamma isa FrequencyDependentNonlinearity) ?
+                (grid.omega0 + 7dw) / grid.omega0 : 1.0)
+            # Discrete Raman DC response determines the constant-intensity factor.
+            raman_factor = raman === nothing ? 1.0 :
+                1 - model.fr + model.fr * grid.dt * real(model.RW[1])
+            for j in eachindex(Z)
+                E = sum(abs2, At[:, j]) * grid.dt
+                @test log(E/E0) + (E-E0)/active.Esat ≈ active.g0 * Z[j] atol=1e-9
+                integrated_power = ((E-E0) + (E^2-E0^2)/(2active.Esat)) /
+                    (active.g0 * grid.N * grid.dt)
+                @test At[:, j] ≈ tone .* sqrt(E/E0) .* cis(gamma_eff * raman_factor * integrated_power) rtol=1e-8
+            end
+        end
+    end
+end

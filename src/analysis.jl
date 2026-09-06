@@ -149,13 +149,10 @@ end
 
 function photon_number(solution::Solution)
     if isempty(solution.AW)
-        # When save_freq=false, AW is empty (0x0). Fallback to time-domain At computation.
-        # By Parseval's theorem, Σ |AW|² = (1/N) Σ |At|².
-        N = size(solution.At, 1)
-        return [
-            sum(abs2, view(solution.At, :, j)) / (N * solution.omega0) for
-            j in axes(solution.At, 2)
-        ]
+        # Reconstruct FFT-natural spectra and align the frequency denominator.
+        W = ifftshift(solution.W)
+        return [sum(abs2.(ifft(view(solution.At, :, j))) ./ W)
+                for j in axes(solution.At, 2)]
     end
     # solution.AW columns and solution.W are both in monotonic order
     return [sum(abs2.(view(solution.AW, :, j)) ./ solution.W) for j in axes(solution.AW, 2)]
@@ -390,20 +387,22 @@ end
     spectral_coherence(pulses::AbstractVector{<:Pulse})
 
 Convenience overload: accepts a vector of [`Pulse`](@ref) objects and extracts
-their frequency-domain envelopes (AW fields) before computing coherence.
+their frequency-domain envelopes in monotonic grid.W order before computing coherence.
 """
 spectral_coherence(pulses::AbstractVector{<:Pulse}) =
-    spectral_coherence([p.AW for p in pulses])
+    spectral_coherence([fftshift(p.AW) for p in pulses])
 
 """
     spectral_coherence(solutions::AbstractVector{<:Solution})
 
 Convenience overload: accepts a vector of [`Solution`](@ref) objects and extracts
 the final spectrum (AW field at the last propagation distance) from each,
-then computes coherence across the ensemble.
+then computes coherence across the ensemble in monotonic sol.W order.
+When spectra were not saved, reconstructs them from the time-domain fields.
 """
 spectral_coherence(solutions::AbstractVector{<:Solution}) =
-    spectral_coherence([@view(sol.AW[:, end]) for sol in solutions])
+    spectral_coherence([isempty(sol.AW) ? fftshift(ifft(sol.At[:, end])) :
+                        sol.AW[:, end] for sol in solutions])
 
 """
     spectrogram(pulse::Pulse; n_delay=200, gate_fwhm=nothing) -> (t_delays, V_grid, S_matrix)
@@ -469,7 +468,8 @@ function shg_frog_trace(pulse::Pulse; n_delay::Int=200)
         I_frog[:, j] .= abs2.(fftshift(ifft(signal)))
     end
 
-    V_shg = 2.0 .* pulse.grid.V
+    # The carrier doubles, but the DFT detuning-bin spacing is unchanged.
+    V_shg = pulse.grid.V
     return t_delays, V_shg, I_frog
 end
 
