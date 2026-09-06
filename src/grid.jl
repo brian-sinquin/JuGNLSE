@@ -11,7 +11,7 @@ Create time-frequency grid for GNLSE simulations in natural SI units.
 
 # Arguments
 
-  - `resolution::Int`: Number of grid points (power of 2 recommended)
+  - `resolution::Int`: Even number of grid points, at least 2 (power of 2 recommended)
   - `time_window::Real`: Total time window [s]
   - `wavelength::Real`: Center wavelength [m]
 

@@ -11,11 +11,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### Critical Bug Fixes (from research-quality audit)
 
-- **C2 — Pulse(Solution) spectral ordering**: Fixed missing `ifftshift` when constructing `Pulse` from `Solution`. The saved `AW` was in monotonic frequency order while `Pulse.AW` must be in FFT-natural order. This affected all scalar cascade and piping paths.
+- **C2 — Pulse(Solution) spectral ordering**: Fixed missing `ifftshift` when constructing `Pulse` from `Solution`. The saved `AW` was in monotonic frequency order while `Pulse.AW` must be in FFT-natural order. This affected all scalar cascade and piping paths. Conversion also reconstructs the spectrum from `At` when `save_freq=false`.
 
 - **C3 — Filter spectral ordering**: Fixed `Filter` applying transfer function evaluated on monotonic `grid.W` directly to `pulse.AW` (FFT-natural order). Added `ifftshift` to the transfer vector so broadband filters correctly pass energy instead of suppressing it by ~100%.
 
-- **C4 — Amplifying medium Kerr normalization**: Removed spurious extra `1/ω₀` factor in `_amplifying_spm` and `_amplifying_spm_raman`. Kerr term in zero-gain amplifier now matches passive medium exactly (verified by derivative norm ratio = 1).
+- **C4 — Amplifying medium Kerr normalization**: Removed spurious extra `1/ω₀` factor in `_amplifying_spm` and `_amplifying_spm_raman`. Kerr term in zero-gain amplifier now matches passive medium exactly. Gain saturation is transformed separately and is not multiplied by the Kerr spectral coefficient, including with Raman enabled.
 
 - **H4 — Grid validation**: Added explicit rejection of `N < 2` and odd `N` in `create_grid`. Odd grids produce inconsistent `length(t) ≠ length(V)` and break FFT conventions.
 
@@ -30,7 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Minimum Julia version unchanged (1.10)
-- All 384 tests pass (371 existing + 13 new audit tests)
+- All 503 tests pass (371 existing + 13 original audit assertions + 119 review regression assertions). Review regressions cover complex cascades, signed-tone scalar/vector filters, even FFT bins, all scalar gamma representations, Raman/shock/gain combinations, exact SPM phase, and saturated energy evolution.
 
 ## [0.2.1] - 2026-08-XX
 

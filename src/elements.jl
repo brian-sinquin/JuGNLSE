@@ -31,6 +31,9 @@ end
     Filter(transfer_function)
 
 Represent a lumped filter that applies a frequency-domain transfer function to the pulse.
+`transfer_function(ω)` receives absolute angular frequency [rad/s] and returns
+a complex field transmission. The same scalar transmission acts on both
+polarizations of a `VectorialPulse`.
 """
 struct Filter{F} <: LumpedElement
     transfer_function::F
