@@ -89,6 +89,18 @@ disagreement at the 1e-3 level is FD, not AD. Diagnose by computing FD at two
 step sizes; if they disagree with each other, the checker is the problem.
 `abs()` at a numerically-zero point is a known legitimate source of this.
 
+**A NaN objective passes every comparison you guard it with.** The compression
+example bisected `dτ/dN` over a bracket whose upper half diverged (`max I =
+NaN`), and reported a converged root: `NaN < 0` and `NaN <= 0` are both false, so
+the bracket test accepted a non-finite endpoint and every non-finite midpoint
+pulled `hi` down. It converged on the order where the *solver* breaks, which sat
+near the expected answer, and agreed with the literature to 0.13 % — entirely by
+coincidence. Print the objective across a search range and require it finite
+throughout before believing anything found inside it, and size the step count for
+the hardest point the search can reach, not for the nominal operating point
+(1600 steps diverged at N = 5.5 where 3200 did not, against a `steps_for_order`
+heuristic asking for 2200).
+
 **Watch the physics before blaming the AD.** One long hunt ended at a missing
 `grid.dt` in an energy normalization (`E = ∫|A|²dt ≈ dt·Σ|A|²`), which scaled a
 whole experiment by `√dt ≈ 4e-8` and made every downstream number meaningless.

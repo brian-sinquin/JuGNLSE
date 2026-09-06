@@ -138,8 +138,11 @@ mode is strictly better on both axes.
 
 *Resolved,* and now exercised by a real design problem:
 `.github/scripts/ad_soliton_compression_optimum.jl` locates a soliton
-compressor's optimal pump power through the full solver in forward mode, and
-agrees with the published optimum on the soliton order to 0.13 %.
+compressor's optimal pump power through the full solver in forward mode, scoring
+itself against the published optimum for the soliton order. It verifies that its
+search bracket is computable end to end before trusting a root inside it — an
+earlier version did not, and reported the order at which the solver diverges as
+though it were a zero of the derivative.
 
 `EnzymeRules.forward` is implemented. For a linear operator the rule
 is nearly trivial — the tangent obeys the same map as the primal

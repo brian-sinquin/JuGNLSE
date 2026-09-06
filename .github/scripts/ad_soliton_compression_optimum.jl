@@ -57,11 +57,19 @@ printed rather than asserted. Both are confirmed by the run:
          N        1.5     2.0     3.0     4.0     5.0     8.0
          F_c/4.1N 0.381   0.508   0.685   0.781   0.835   0.918
 
-At N ≈ 4 the AD optimum and the formula agree on the soliton order to **0.13 %**
-(4.0051 vs 4.0000), against 4.19 % at N ≈ 2.5 — a thirtyfold improvement from
-nothing but moving into the regime where the relation is meant to apply. The
-compression factor agrees there too (12.83 measured vs 12.81 at the predicted
-order), while `4.1N = 16.4` remains the optimistic asymptote it is.
+The agreement between the AD optimum and the formula at N ≈ 4 is printed by the
+run itself, next to `4.1N`, which remains the optimistic asymptote it is.
+
+A number quoted here previously (0.13 %) was withdrawn: it came from a run whose
+objective diverged just above N ≈ 4, and the bisection had converged on the
+order at which the *solver* breaks rather than on a zero of dτ_eff/dN. Because
+`NaN < 0` and `NaN <= 0` are both false, every non-finite midpoint silently
+pulled the bracket down, and the boundary happened to sit near 4.0 — so the
+agreement was coincidence, and the FWHM "confirmation" beside it was circular,
+comparing two nearly-equal values of N. Hence the two guards now in the script:
+the search bracket is printed and must be finite end to end before a root inside
+it means anything, and the step count is sized for the top of that bracket
+rather than for N_target.
 
 # Choosing an objective that means "compressed"
 
@@ -164,7 +172,19 @@ end
 # --- The experiment: a fiber cut for soliton order ~4 ---
 N_target = 4.0
 L = length_for_order(N_target)
-n_steps = steps_for_order(N_target)
+
+# The optimum is searched over [N_search_lo, N_search_hi], and the objective is
+# a *fixed* (L, n_steps) configuration -- so the step count has to be sized for
+# the hardest order the search can reach, not for N_target. Sizing it for
+# N_target is what broke this example: at 1600 steps the split-step error at
+# N ~ 5 diverged outright (max I = NaN), dtau/dN never changed sign anywhere it
+# could still be evaluated, and the bisection walked into the NaN boundary
+# instead of a root -- landing near 4.0 by coincidence, since `NaN < 0` is false
+# and every NaN midpoint pulled the bracket down. CI showed 1600 steps failing
+# at N = 5.5 where 3200 succeeded, against steps_for_order(5.5) = 2200, so that
+# heuristic is optimistic by ~1.5x here; the factor of 2 below covers it.
+N_search_lo, N_search_hi = 2.5, 6.5
+n_steps = 2 * steps_for_order(N_search_hi)
 N_lit = order_for_length(L)      # round-trips back to N_target
 P0_lit = peak_power_of_N(N_lit)
 Fc_lit = 4.1 * N_lit
@@ -248,7 +268,7 @@ end
 
 # --- Scan and bisection ---
 println("\nScanning soliton order (effective duration and its exact derivative)...")
-N_scan = collect(range(2.4, 6.4; length=15))
+N_scan = collect(range(N_search_lo, N_search_hi; length=15))
 tau_scan = similar(N_scan)
 dtau_scan = similar(N_scan)
 for (k, Nv) in enumerate(N_scan)
@@ -304,7 +324,17 @@ function bisect_derivative(deriv, lo, hi; iters=28)
     return 0.5 * (lo + hi), true
 end
 
-N_ad, bracketed = bisect_derivative(dtau_dN, 2.5, 6.5)
+# Show the objective is actually computable across the bracket before trusting a
+# root found inside it. A non-finite row here means the step count is still too
+# low for that order, and any "optimum" reported below would be an artifact of
+# where the solver breaks rather than of where the derivative vanishes.
+println("\nObjective across the search bracket (must be finite throughout):")
+@printf("  %6s %16s %16s\n", "N", "tau_eff [s]", "dtau/dN")
+for Nv in range(N_search_lo, N_search_hi; length=9)
+    @printf("  %6.2f %16.6e %+16.6e\n", Nv, tau_at(Nv), dtau_dN(Nv))
+end
+
+N_ad, bracketed = bisect_derivative(dtau_dN, N_search_lo, N_search_hi)
 if !bracketed
     println("The optimum is not bracketed — reporting the scan minimum instead.")
     N_ad = N_scan[argmin(tau_scan)]
