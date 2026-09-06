@@ -367,11 +367,19 @@ function _amplifying_spm(u, model::PhysicsModel, z::Real)
     gamma_z = eval_gamma(model.gamma, z, model.omega0)
     ig = 1.0im * gamma_z
 
-    @. model.buf_t1 = u * (ig * abs2(u) + delta_g)
+    # Kerr term in time domain: u * (i * gamma_z * |u|^2)
+    @. model.buf_t1 = u * (ig * abs2(u))
+    # FFT of Kerr term
+    mul!(model.buf_f1, model.to_freq, model.buf_t1)   # buf_f1 = FFT(i*gamma_z*|u|^2*u)
+    # Apply gamma_W to Kerr term
+    @. model.buf_f1 = model.buf_f1 * model.gamma_W
 
-    mul!(model.buf_f1, model.to_freq, model.buf_t1)
-    inv_w0 = 1.0 / model.omega0
-    @. model.buf_f1 = model.buf_f1 * model.gamma_W * inv_w0
+    # Gain term in time domain: delta_g * u
+    @. model.buf_t1 = delta_g * u
+    # FFT gain term into temporary buffer buf_t2
+    mul!(model.buf_t2, model.to_freq, model.buf_t1)   # buf_t2 = FFT(delta_g * u)
+    # Add gain term frequency domain (no gamma_W multiplication)
+    @. model.buf_f1 += model.buf_t2
 
     return model.buf_f1
 end
@@ -399,8 +407,10 @@ function _amplifying_spm_raman(u, model::PhysicsModel, z::Real)
         u * (ig * ((1.0 - model.fr) * abs2(u) + model.fr * dt * model.buf_t2) + delta_g)
 
     mul!(model.buf_f1, model.to_freq, model.buf_t1)
-    inv_w0 = 1.0 / model.omega0
-    @. model.buf_f1 = model.buf_f1 * model.gamma_W * inv_w0
+    # gamma_W already carries the correct frequency weighting (omega or omega0);
+    # _resolve_gamma pre-divides gamma_z by omega0. No extra 1/omega0 factor needed
+    # — the passive _spm path does not apply one either.
+    @. model.buf_f1 = model.buf_f1 * model.gamma_W
 
     return model.buf_f1
 end

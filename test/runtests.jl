@@ -3,6 +3,7 @@ using Soliton
 
 @testset verbose = true "Soliton.jl" begin
     include("test_unit.jl")
+    include("test_audit_fixes.jl")
     include("test_api.jl")
     include("test_solvers.jl")
     include("test_physics.jl")

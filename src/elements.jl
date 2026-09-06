@@ -119,13 +119,16 @@ function apply(vpulse::VectorialPulse, att::Attenuator)
 end
 
 function apply(pulse::Pulse, filt::Filter)
-    AW = pulse.AW .* filt.transfer_function.(pulse.grid.W)
+    # grid.W is monotonic; pulse.AW is in FFT-natural order.
+    # ifftshift converts the monotonic transfer vector to FFT-natural order.
+    tf = ifftshift(filt.transfer_function.(pulse.grid.W))
+    AW = pulse.AW .* tf
     At = fft(AW) # fft is standard optics convention: At = fft(AW)
     return Pulse(At, AW, pulse.grid)
 end
 
 function apply(vpulse::VectorialPulse, filt::Filter)
-    tf = filt.transfer_function.(vpulse.grid.W)
+    tf = ifftshift(filt.transfer_function.(vpulse.grid.W))
     AW = vpulse.AW .* tf
     At = similar(vpulse.At)
     At[:, 1] = fft(AW[:, 1])

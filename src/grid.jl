@@ -37,7 +37,8 @@ Create time-frequency grid for GNLSE simulations in natural SI units.
 on FFT output apply `ifftshift` as needed.
 """
 function create_grid(resolution::Int, time_window::Real, wavelength::Real)
-    resolution > 0 || throw(ArgumentError("resolution must be positive"))
+    resolution >= 2 || throw(ArgumentError("resolution must be >= 2"))
+    iseven(resolution) || throw(ArgumentError("resolution must be even (odd N produces inconsistent frequency grids)"))
     ispow2(resolution) ||
         @warn "resolution should be a power of 2 for optimal FFT performance"
     time_window > 0 || throw(ArgumentError("time_window must be positive"))

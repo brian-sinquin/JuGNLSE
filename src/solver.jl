@@ -161,7 +161,7 @@ function Pulse(sol::Solution)
     V = sol.W .- sol.omega0
     lambda0 = 2π * c / sol.omega0
     grid = Grid(N, sol.t, V, sol.W, dt, sol.omega0, lambda0)
-    return Pulse(sol.At[:, end], sol.AW[:, end], grid)
+    return Pulse(sol.At[:, end], ifftshift(sol.AW[:, end]), grid)
 end
 
 # Make SimParams callable for piping support
