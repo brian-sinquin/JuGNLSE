@@ -107,6 +107,15 @@ with a hand-tuned learning rate — which has already produced two real bugs in
 this repository's examples — the optimum is found by bisecting the derivative to
 its zero crossing. No step size, monotone convergence, bracket verified up front.
 
+The bracket cannot simply be the whole search range, because τ_eff(N) is not
+unimodal. Past the first optimum the pulse recompresses and breaks up
+repeatedly, so at fixed fiber length the output duration oscillates with N and
+dτ_eff/dN changes sign several times; run 34019541481 shows it flipping at
+N ≈ 4.5, 5.0, 5.5 and 6.0. The scan is therefore searched for sign changes that
+enclose a *minimum* (− then +), and the one enclosing the smallest τ_eff is
+bisected, so the answer is the deepest optimum rather than whichever local one
+happens to come first.
+
 Run with:
     julia --project=. -e 'import Pkg; Pkg.add(["Enzyme", "Plots"])'
     julia --project=. examples/ad_soliton_compression_optimum.jl
@@ -324,20 +333,65 @@ function bisect_derivative(deriv, lo, hi; iters=28)
     return 0.5 * (lo + hi), true
 end
 
-# Show the objective is actually computable across the bracket before trusting a
-# root found inside it. A non-finite row here means the step count is still too
-# low for that order, and any "optimum" reported below would be an artifact of
-# where the solver breaks rather than of where the derivative vanishes.
-println("\nObjective across the search bracket (must be finite throughout):")
+# The scan doubles as the evidence that the objective is computable across the
+# whole range: a non-finite row means the step count is too low for that order,
+# and any "optimum" reported below would be an artifact of where the solver
+# breaks rather than of where the derivative vanishes. That is not hypothetical
+# -- it is exactly what this example did before n_steps was sized for
+# N_search_hi.
+println("\nObjective across the search range:")
 @printf("  %6s %16s %16s\n", "N", "tau_eff [s]", "dtau/dN")
-for Nv in range(N_search_lo, N_search_hi; length=9)
-    @printf("  %6.2f %16.6e %+16.6e\n", Nv, tau_at(Nv), dtau_dN(Nv))
+for (Nv, tv, dv) in zip(N_scan, tau_scan, dtau_scan)
+    @printf("  %6.2f %16.6e %+16.6e%s\n", Nv, tv, dv,
+        (isfinite(tv) && isfinite(dv)) ? "" : "   <-- NOT FINITE")
+end
+n_bad = count(!isfinite, tau_scan) + count(!isfinite, dtau_scan)
+n_bad == 0 || @printf("  %d non-finite entries: raise n_steps before believing any root.\n",
+    n_bad)
+
+"""
+Sub-intervals of the scan where dτ/dN crosses from negative to positive, i.e.
+that contain a minimum.
+
+Needed because τ_eff(N) is *not* unimodal. Above the first optimum a
+higher-order soliton keeps recompressing and breaking up as it propagates, so
+with the fiber length held fixed the output duration oscillates with N and the
+derivative changes sign several times. A single bracket over the whole range
+therefore has the same sign at both ends, and the classical bracket test
+rejects it — correctly, but uselessly. Ordering the crossings by the τ_eff they
+enclose picks the deepest minimum rather than whichever one comes first.
+"""
+function minimum_brackets(Ns, taus, dtaus)
+    out = NTuple{3,Float64}[]
+    for k in 1:(length(Ns) - 1)
+        (isfinite(dtaus[k]) && isfinite(dtaus[k + 1])) || continue
+        if dtaus[k] < 0 && dtaus[k + 1] > 0
+            push!(out, (Ns[k], Ns[k + 1], min(taus[k], taus[k + 1])))
+        end
+    end
+    return sort(out; by=last)
 end
 
-N_ad, bracketed = bisect_derivative(dtau_dN, N_search_lo, N_search_hi)
+brackets = minimum_brackets(N_scan, tau_scan, dtau_scan)
+@printf("\nSign changes of dtau/dN enclosing a minimum: %d\n", length(brackets))
+for (lo, hi, tmin) in brackets
+    @printf("  [%.4f, %.4f]  min tau_eff on the pair = %.6e\n", lo, hi, tmin)
+end
+
+if isempty(brackets)
+    println("No minimum bracketed anywhere in the scan.")
+    N_ad, bracketed = NaN, false
+else
+    lo_b, hi_b, _ = first(brackets)
+    N_ad, bracketed = bisect_derivative(dtau_dN, lo_b, hi_b)
+end
 if !bracketed
     println("The optimum is not bracketed — reporting the scan minimum instead.")
-    N_ad = N_scan[argmin(tau_scan)]
+    # argmin would happily return a NaN entry, which is how a broken run once
+    # reported N = 5.5429 with a 0.00 fs output. Rank only the finite ones.
+    ok = findall(isfinite, tau_scan)
+    isempty(ok) && error("objective is non-finite everywhere on the scan")
+    N_ad = N_scan[ok[argmin(tau_scan[ok])]]
 end
 
 # --- Result, measured by plain simulation ---
