@@ -35,11 +35,15 @@ the new capability is opt-in via a weak dependency.
   fundamental soliton shape from propagation invariance alone, and location of
   a soliton-effect compressor's optimal operating point. The last one is
   cross-checked against the published empirical optimum
-  (`z_opt/z₀ ≈ 0.32/N + 1.1/N²`) rather than only against itself, printing the
-  agreement it achieves on the soliton order. It verifies that its search
-  bracket is computable end to end before reporting a root inside it, carries
-  its own convergence check, and includes a sweep showing that the companion
-  relation
+  (`z_opt/z₀ ≈ 0.32/N + 1.1/N²`) rather than only against itself, and agrees
+  with it on the soliton order to **0.25 %** (N = 4.0099 vs 4.0000), reaching a
+  marginally shorter pulse than the formula's order does (13.9 fs vs 14.0 fs).
+  Because the objective is not unimodal — a higher-order soliton recompresses
+  and breaks up repeatedly, so the output duration oscillates with N — it
+  locates minima from sign changes of the exact derivative and bisects the one
+  enclosing the smallest duration. It requires the objective to be finite across
+  the whole search range first, carries its own convergence check, and includes
+  a sweep showing that the companion relation
   `F_c ≈ 4.1N` is a large-N asymptotic — the measured/predicted ratio climbs
   monotonically from 0.38 at N = 1.5 to 0.92 at N = 8. It uses forward mode:
   one free parameter, so reverse mode would tape the whole propagation to

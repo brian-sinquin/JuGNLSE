@@ -57,19 +57,24 @@ printed rather than asserted. Both are confirmed by the run:
          N        1.5     2.0     3.0     4.0     5.0     8.0
          F_c/4.1N 0.381   0.508   0.685   0.781   0.835   0.918
 
-The agreement between the AD optimum and the formula at N ≈ 4 is printed by the
-run itself, next to `4.1N`, which remains the optimistic asymptote it is.
+At N ≈ 4 the AD optimum and the formula agree on the soliton order to **0.25 %**
+(4.0099 vs 4.0000, run 34019981037), and the AD point is the marginally better
+one by direct measurement — 13.9 fs output against 14.0 fs at the formula's
+order — which is what an optimizer should deliver. `4.1N = 16.4` remains the
+optimistic asymptote it is, against 12.64 measured.
 
-A number quoted here previously (0.13 %) was withdrawn: it came from a run whose
-objective diverged just above N ≈ 4, and the bisection had converged on the
-order at which the *solver* breaks rather than on a zero of dτ_eff/dN. Because
-`NaN < 0` and `NaN <= 0` are both false, every non-finite midpoint silently
-pulled the bracket down, and the boundary happened to sit near 4.0 — so the
-agreement was coincidence, and the FWHM "confirmation" beside it was circular,
-comparing two nearly-equal values of N. Hence the two guards now in the script:
-the search bracket is printed and must be finite end to end before a root inside
-it means anything, and the step count is sized for the top of that bracket
-rather than for N_target.
+An earlier version of this script reported 0.13 % here, and that number was
+withdrawn rather than improved on. Its objective diverged just above N ≈ 4, and
+the bisection had converged on the order at which the *solver* breaks rather
+than on a zero of dτ_eff/dN: `NaN < 0` and `NaN <= 0` are both false, so every
+non-finite midpoint silently pulled the bracket down. The boundary happened to
+sit near 4.0, so the agreement was coincidence, and the FWHM figure quoted
+beside it as confirmation was circular — it compared two nearly-equal values of
+N. A large-N asymptotic relation reproducing to 0.13 % should have been
+suspicious on its face; a couple of percent is what its own accuracy supports.
+Hence the guards now in the script: the step count is sized for the top of the
+search range, and the objective must be finite across that whole range before
+any root inside it is believed.
 
 # Choosing an objective that means "compressed"
 
