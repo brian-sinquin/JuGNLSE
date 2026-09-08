@@ -92,3 +92,22 @@ using Statistics
         @test dispersive_wave_wavelength(medium, pulse; P0) ≈ expected rtol=1e-5
     end
 end
+
+@testset "Solver × medium × Raman × shock matrix" begin
+    for solver in (ERK4IP(), SSFM(1e-5)), raman in (nothing, BlowWood()), shock in (true, false)
+        @testset "$(typeof(solver)), $(typeof(raman)), shock=$shock" begin
+            grid = create_grid(2^10, 5e-12, 1550e-9)
+            medium = Medium(0.01, 0.01, 0.0, [-20e-27], 1550e-9)
+            pulse = gaussian_pulse(grid, 100.0, 100e-15)
+            params = SimParams(; medium, solver, raman_model=raman,
+                               self_steepening=shock, z_saves=5)
+            sol = solve(pulse, params; progress=false)
+            @test all(isfinite, sol.At)
+            @test all(isfinite, sol.AW)
+            @test sol.Z[end] ≈ medium.length
+            energies = vec(sum(abs2, sol.At; dims=1)) .* grid.dt
+            # Short, lossless propagation: allow 1% drift for Euler and shock/Raman.
+            @test all(e -> isapprox(e, pulse_energy(pulse); rtol=0.01), energies)
+        end
+    end
+end
